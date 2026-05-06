@@ -15,6 +15,8 @@ import {
 
 // --- Types ---
 
+type ProcessingMode = 'distribution' | 'flatten';
+
 interface RawDataEntry {
   dropName: string;
   sessionName: string;
@@ -43,6 +45,25 @@ interface DistributedData {
 function detect_format(input: string): 'multi-drop' | 'single-list' {
   const hasDropKeyword = /drop/i.test(input);
   return hasDropKeyword ? 'multi-drop' : 'single-list';
+}
+
+/**
+ * Extracts ONLY the ID inside brackets [] sequentially from all lines.
+ * Each line may contain multiple groups.
+ */
+function extract_ids(input: string): string[] {
+  const ids: string[] = [];
+  const lines = input.split(/\r?\n/);
+  // Match content inside brackets: [ID]
+  const bracketRegex = /\[([^\]]+)\]/g;
+  
+  lines.forEach(line => {
+    let match;
+    while ((match = bracketRegex.exec(line)) !== null) {
+      ids.push(`[${match[1]}]`);
+    }
+  });
+  return ids;
 }
 
 /**
@@ -303,9 +324,74 @@ const HourBox: React.FC<{ hour: number; profiles: string[] }> = ({ hour, profile
   );
 };
 
+const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (ids.length === 0) return;
+    navigator.clipboard.writeText(ids.join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-800/20">
+        <div className="flex items-center gap-3">
+          <Terminal className="w-5 h-5 text-blue-400" />
+          <span className="font-display font-semibold text-lg uppercase tracking-tight">Tags List</span>
+          <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-mono">
+            {ids.length} IDs
+          </span>
+        </div>
+        <button
+          onClick={handleCopy}
+          className={`
+            flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold uppercase transition-all
+            ${copied ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}
+          `}
+        >
+          <ClipboardCopy className="w-4 h-4" />
+          {copied ? 'Copied Everything' : 'Copy All'}
+        </button>
+      </div>
+
+      <div 
+        onClick={handleCopy}
+        className="p-6 cursor-pointer group relative"
+      >
+        <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+          {ids.length === 0 ? (
+            <div className="text-zinc-600 italic">No IDs found in brackets [ ]</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1">
+              {ids.map((id, index) => (
+                <div key={index} className="text-xs font-mono text-zinc-400 flex items-center gap-3 group/item py-0.5">
+                  <span className="text-zinc-700 w-6 text-right select-none">{index + 1}.</span>
+                  <span className="text-zinc-300 group-hover/item:text-blue-400 transition-colors uppercase">{id}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        
+        {ids.length > 0 && (
+          <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+            <div className="bg-zinc-950 px-4 py-2 rounded-full border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest shadow-2xl">
+              Click anywhere to copy all
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [rawInput, setRawInput] = useState('');
+  const [mode, setMode] = useState<ProcessingMode>('distribution');
   const [result, setResult] = useState<DistributedData | null>(null);
+  const [flattenedIds, setFlattenedIds] = useState<string[] | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleProcess = () => {
@@ -315,11 +401,18 @@ export default function App() {
     // Slight delay for UI feel
     setTimeout(() => {
       try {
-        const rawData = parse_input(rawInput);
-        const grouped = group_sessions(rawData);
-        const distributed = split_into_23_hours(grouped);
-        const final = format_output(distributed);
-        setResult(final);
+        if (mode === 'distribution') {
+          const rawData = parse_input(rawInput);
+          const grouped = group_sessions(rawData);
+          const distributed = split_into_23_hours(grouped);
+          const final = format_output(distributed);
+          setResult(final);
+          setFlattenedIds(null);
+        } else {
+          const ids = extract_ids(rawInput);
+          setFlattenedIds(ids);
+          setResult(null);
+        }
       } catch (error) {
         console.error("Processing error:", error);
         alert("Failed to process data. Check console for details.");
@@ -343,11 +436,15 @@ export default function App() {
   const handleClear = () => {
     setRawInput('');
     setResult(null);
+    setFlattenedIds(null);
   };
 
   const handleCopyResult = () => {
-    if (!result) return;
-    navigator.clipboard.writeText(JSON.stringify(result, null, 2));
+    if (result) {
+      navigator.clipboard.writeText(JSON.stringify(result, null, 2));
+    } else if (flattenedIds) {
+      navigator.clipboard.writeText(flattenedIds.join('\n'));
+    }
   };
 
   return (
@@ -369,21 +466,23 @@ export default function App() {
         </div>
 
         <div className="flex gap-2">
-          {result && (
+          {(result || flattenedIds) && (
             <>
-              <button 
-                onClick={handleExportJSON}
-                className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
-              >
-                <FileJson className="w-4 h-4 text-blue-400" />
-                Export JSON
-              </button>
+              {result && (
+                <button 
+                  onClick={handleExportJSON}
+                  className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
+                >
+                  <FileJson className="w-4 h-4 text-blue-400" />
+                  Export JSON
+                </button>
+              )}
               <button 
                 onClick={handleCopyResult}
                 className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
               >
                 <ClipboardCopy className="w-4 h-4 text-zinc-400" />
-                Copy JSON
+                {result ? 'Copy JSON' : 'Copy All IDs'}
               </button>
             </>
           )}
@@ -404,15 +503,34 @@ export default function App() {
             <Terminal className="w-32 h-32 text-zinc-800/10" />
           </div>
           
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-            <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Input Data (Auto-Detect)</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+              <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Input Data</h2>
+            </div>
+            
+            <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setMode('distribution')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'distribution' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                Distribute Sessions
+              </button>
+              <button
+                onClick={() => setMode('flatten')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'flatten' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                Get Tags
+              </button>
+            </div>
           </div>
 
           <textarea
             value={rawInput}
             onChange={(e) => setRawInput(e.target.value)}
-            placeholder="Paste raw table, messy text, or lists here...&#10;sessionName 1234 [id]&#10;ANY_STRING 9999&#10;Drop 1 | Drop 2&#10;test1 10 [id] | test2 20 [id]"
+            placeholder={mode === 'distribution' 
+              ? "sessionName 1 [A] sessionName 2 [B]\nExtracts sessions and numbers..." 
+              : "Paste rows with [IDs]...\nExtracts only content within brackets []"}
             className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none"
           />
 
@@ -430,7 +548,7 @@ export default function App() {
               {isProcessing ? 'Processing...' : (
                 <>
                   <Play className="w-5 h-5 fill-current" />
-                  Process & Distribute
+                  {mode === 'distribution' ? 'Process & Distribute' : 'Get Tags'}
                 </>
               )}
             </button>
@@ -439,7 +557,7 @@ export default function App() {
 
         {/* Results Section */}
         <AnimatePresence mode="wait">
-          {result ? (
+          {result || flattenedIds ? (
             <motion.section
               key="result"
               initial={{ opacity: 0, y: 20 }}
@@ -448,19 +566,27 @@ export default function App() {
               className="space-y-6"
             >
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Distribution Result</h2>
+                <div className={`w-2 h-2 rounded-full ${result ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]'}`} />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
+                  {result ? 'Distribution Result' : 'Tags List'}
+                </h2>
               </div>
 
               <div className="space-y-4">
-                {Object.keys(result).length === 0 ? (
-                  <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-600">
-                    No data identified. Ensure session names are followed by profile numbers.
-                  </div>
-                ) : (
-                  (Object.entries(result) as [string, { [sessionName: string]: { [hour: number]: string[] } }][]).map(([dropName, dropData]) => (
-                    <DropResult key={dropName} name={dropName} sessions={dropData} />
-                  ))
+                {result && (
+                  Object.keys(result).length === 0 ? (
+                    <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-600">
+                      No data identified. Ensure session names are followed by profile numbers.
+                    </div>
+                  ) : (
+                    (Object.entries(result) as [string, { [sessionName: string]: { [hour: number]: string[] } }][]).map(([dropName, dropData]) => (
+                      <DropResult key={dropName} name={dropName} sessions={dropData} />
+                    ))
+                  )
+                )}
+                
+                {flattenedIds && (
+                  <FlattenedResult ids={flattenedIds} />
                 )}
               </div>
             </motion.section>
