@@ -1,0 +1,6 @@
+{
+  "name": "SessionFlow - Data Processor",
+  "description": "Organizes and distributes session data across a 23-hour schedule for multiple drops.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
