@@ -15,7 +15,17 @@ import {
 
 // --- Types ---
 
-type ProcessingMode = 'distribution' | 'flatten';
+type ProcessingMode = 'distribution' | 'flatten' | 'reorganize';
+
+interface ReorganizedEntry {
+  number: string;
+  name: string;
+  id: string;
+}
+
+interface ReorganizedData {
+  [sessionName: string]: ReorganizedEntry[];
+}
 
 interface RawDataEntry {
   dropName: string;
@@ -64,6 +74,29 @@ function extract_ids(input: string): string[] {
     }
   });
   return ids;
+}
+
+/**
+ * Reorganizes horizontal multi-session rows into vertical grouped records.
+ */
+function parse_reorganize(input: string): ReorganizedData {
+  const result: ReorganizedData = {};
+  const lines = input.split(/\r?\n/);
+  // regex: session_name whitespace number whitespace [ID]
+  const groupRegex = /(\S+)\s+(\d+)\s+(\[[^\]]+\])/g;
+
+  lines.forEach(line => {
+    let match;
+    while ((match = groupRegex.exec(line)) !== null) {
+      const [_, name, number, id] = match;
+      if (!result[name]) {
+        result[name] = [];
+      }
+      result[name].push({ number, name, id });
+    }
+  });
+
+  return result;
 }
 
 /**
@@ -387,44 +420,156 @@ const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
   );
 };
 
-export default function App() {
-  const [rawInput, setRawInput] = useState('');
-  const [mode, setMode] = useState<ProcessingMode>('distribution');
-  const [result, setResult] = useState<DistributedData | null>(null);
-  const [flattenedIds, setFlattenedIds] = useState<string[] | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
+  const [copiedAll, setCopiedAll] = useState(false);
 
-  const handleProcess = () => {
-    if (!rawInput.trim()) return;
-    setIsProcessing(true);
-    
-    // Slight delay for UI feel
+  const handleCopyAll = () => {
+    const all = (Object.values(data) as ReorganizedEntry[][]).flat();
+    if (all.length === 0) return;
+    const text = all.map(e => `${e.number}#${e.name}`).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end">
+        <button
+          onClick={handleCopyAll}
+          className={`
+            flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all
+            ${copiedAll ? 'bg-emerald-600 shadow-emerald-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'} 
+            text-white shadow-lg
+          `}
+        >
+          <ClipboardCopy className="w-4 h-4" />
+          {copiedAll ? 'Copied All Records' : 'Copy All Reorganized'}
+        </button>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {(Object.entries(data) as [string, ReorganizedEntry[]][]).map(([sessionName, entries]) => (
+          <div key={sessionName} className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm">
+            <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-4 bg-blue-500 rounded-full" />
+                <span className="font-display font-semibold text-zinc-200 tracking-tight">{sessionName}</span>
+                <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded font-mono">
+                  {entries.length}
+                </span>
+              </div>
+              <SessionCopyIcon entries={entries} />
+            </div>
+            <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1">
+              {entries.map((e, i) => (
+                <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
+                  <span className="text-zinc-600 w-4 text-right flex-shrink-0">{e.number}</span>
+                  <span className="text-zinc-500 truncate flex-1 group-hover:text-zinc-300 transition-colors">{e.name}</span>
+                  <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors">{e.id}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const SessionCopyIcon: React.FC<{ entries: ReorganizedEntry[] }> = ({ entries }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const text = entries.map(e => `${e.number}#${e.name}`).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button 
+      onClick={handleCopy} 
+      title="Copy this session"
+      className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-500 hover:text-blue-400 hover:bg-zinc-800'}`}
+    >
+      <ClipboardCopy className="w-4 h-4" />
+    </button>
+  );
+};
+
+export default function App() {
+  const [mode, setMode] = useState<ProcessingMode>('distribution');
+
+  // Distribution State
+  const [distInput, setDistInput] = useState('');
+  const [distResult, setDistResult] = useState<DistributedData | null>(null);
+  const [isDistProcessing, setIsDistProcessing] = useState(false);
+
+  // Flatten State
+  const [flatInput, setFlatInput] = useState('');
+  const [flatResult, setFlatResult] = useState<string[] | null>(null);
+  const [isFlatProcessing, setIsFlatProcessing] = useState(false);
+
+  // Reorganize State
+  const [reorgInput, setReorgInput] = useState('');
+  const [reorgResult, setReorgResult] = useState<ReorganizedData | null>(null);
+  const [isReorgProcessing, setIsReorgProcessing] = useState(false);
+
+  const handleProcessDist = () => {
+    if (!distInput.trim()) return;
+    setIsDistProcessing(true);
     setTimeout(() => {
       try {
-        if (mode === 'distribution') {
-          const rawData = parse_input(rawInput);
-          const grouped = group_sessions(rawData);
-          const distributed = split_into_23_hours(grouped);
-          const final = format_output(distributed);
-          setResult(final);
-          setFlattenedIds(null);
-        } else {
-          const ids = extract_ids(rawInput);
-          setFlattenedIds(ids);
-          setResult(null);
-        }
+        const rawData = parse_input(distInput);
+        const grouped = group_sessions(rawData);
+        const distributed = split_into_23_hours(grouped);
+        const final = format_output(distributed);
+        setDistResult(final);
       } catch (error) {
         console.error("Processing error:", error);
         alert("Failed to process data. Check console for details.");
       } finally {
-        setIsProcessing(false);
+        setIsDistProcessing(false);
+      }
+    }, 400);
+  };
+
+  const handleProcessFlat = () => {
+    if (!flatInput.trim()) return;
+    setIsFlatProcessing(true);
+    setTimeout(() => {
+      try {
+        const ids = extract_ids(flatInput);
+        setFlatResult(ids);
+      } catch (error) {
+        console.error("Processing error:", error);
+        alert("Failed to process data. Check console for details.");
+      } finally {
+        setIsFlatProcessing(false);
+      }
+    }, 400);
+  };
+
+  const handleProcessReorg = () => {
+    if (!reorgInput.trim()) return;
+    setIsReorgProcessing(true);
+    setTimeout(() => {
+      try {
+        const data = parse_reorganize(reorgInput);
+        setReorgResult(data);
+      } catch (error) {
+        console.error("Processing error:", error);
+        alert("Failed to process data. Check console for details.");
+      } finally {
+        setIsReorgProcessing(false);
       }
     }, 400);
   };
 
   const handleExportJSON = () => {
-    if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    if (!distResult) return;
+    const blob = new Blob([JSON.stringify(distResult, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -434,16 +579,27 @@ export default function App() {
   };
 
   const handleClear = () => {
-    setRawInput('');
-    setResult(null);
-    setFlattenedIds(null);
+    if (mode === 'distribution') {
+      setDistInput('');
+      setDistResult(null);
+    } else if (mode === 'flatten') {
+      setFlatInput('');
+      setFlatResult(null);
+    } else {
+      setReorgInput('');
+      setReorgResult(null);
+    }
   };
 
   const handleCopyResult = () => {
-    if (result) {
-      navigator.clipboard.writeText(JSON.stringify(result, null, 2));
-    } else if (flattenedIds) {
-      navigator.clipboard.writeText(flattenedIds.join('\n'));
+    if (mode === 'distribution' && distResult) {
+      navigator.clipboard.writeText(JSON.stringify(distResult, null, 2));
+    } else if (mode === 'flatten' && flatResult) {
+      navigator.clipboard.writeText(flatResult.join('\n'));
+    } else if (mode === 'reorganize' && reorgResult) {
+      const all = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
+      const text = all.map(e => `${e.number}#${e.name}`).join('\n');
+      navigator.clipboard.writeText(text);
     }
   };
 
@@ -466,9 +622,9 @@ export default function App() {
         </div>
 
         <div className="flex gap-2">
-          {(result || flattenedIds) && (
+          {((mode === 'distribution' && distResult) || (mode === 'flatten' && flatResult) || (mode === 'reorganize' && reorgResult)) && (
             <>
-              {result && (
+              {mode === 'distribution' && distResult && (
                 <button 
                   onClick={handleExportJSON}
                   className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
@@ -482,7 +638,7 @@ export default function App() {
                 className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
               >
                 <ClipboardCopy className="w-4 h-4 text-zinc-400" />
-                {result ? 'Copy JSON' : 'Copy All IDs'}
+                {mode === 'distribution' ? 'Copy JSON' : mode === 'flatten' ? 'Copy All Tags' : 'Copy All Reordered'}
               </button>
             </>
           )}
@@ -496,121 +652,276 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-8">
-        {/* Input Section */}
-        <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm">
-          <div className="absolute top-0 right-0 p-4 pointer-events-none">
-            <Terminal className="w-32 h-32 text-zinc-800/10" />
-          </div>
-          
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-              <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Input Data</h2>
-            </div>
-            
-            <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-              <button
-                onClick={() => setMode('distribution')}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'distribution' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                Distribute Sessions
-              </button>
-              <button
-                onClick={() => setMode('flatten')}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'flatten' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                Get Tags
-              </button>
-            </div>
-          </div>
+      {/* Mode Selector (Tabs) */}
+      <div className="flex bg-zinc-900/50 p-1.5 rounded-xl border border-zinc-800 mb-8 w-fit">
+        <button
+          onClick={() => setMode('distribution')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'distribution' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
+        >
+          <Layers className="w-4 h-4" />
+          Distribute Sessions
+        </button>
+        <button
+          onClick={() => setMode('flatten')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'flatten' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
+        >
+          <Terminal className="w-4 h-4" />
+          Get Tags
+        </button>
+        <button
+          onClick={() => setMode('reorganize')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'reorganize' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
+        >
+          <Activity className="w-4 h-4" />
+          Reorganize Sessions
+        </button>
+      </div>
 
-          <textarea
-            value={rawInput}
-            onChange={(e) => setRawInput(e.target.value)}
-            placeholder={mode === 'distribution' 
-              ? "sessionName 1 [A] sessionName 2 [B]\nExtracts sessions and numbers..." 
-              : "Paste rows with [IDs]...\nExtracts only content within brackets []"}
-            className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none"
-          />
+      <div className="grid grid-cols-1 gap-12">
+        {mode === 'distribution' ? (
+          <motion.div
+            key="dist-view"
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="space-y-12"
+          >
+            {/* Input Section */}
+            <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm">
+              <div className="absolute top-0 right-0 p-4 pointer-events-none">
+                <Layers className="w-32 h-32 text-zinc-800/10" />
+              </div>
+              
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Distribution Input</h2>
+              </div>
 
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={handleProcess}
-              disabled={!rawInput.trim() || isProcessing}
-              className={`
-                px-8 py-3 rounded-lg flex items-center gap-2 font-display font-medium text-lg transition-all
-                ${!rawInput.trim() || isProcessing 
-                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50' 
-                  : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 active:scale-95'}
-              `}
-            >
-              {isProcessing ? 'Processing...' : (
-                <>
-                  <Play className="w-5 h-5 fill-current" />
-                  {mode === 'distribution' ? 'Process & Distribute' : 'Get Tags'}
-                </>
+              <textarea
+                value={distInput}
+                onChange={(e) => setDistInput(e.target.value)}
+                placeholder="sessionName 1 [A] sessionName 2 [B]\nExtracts sessions and numbers..." 
+                className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none"
+              />
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={handleProcessDist}
+                  disabled={!distInput.trim() || isDistProcessing}
+                  className={`
+                    px-8 py-3 rounded-lg flex items-center gap-2 font-display font-medium text-lg transition-all
+                    ${!distInput.trim() || isDistProcessing 
+                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50' 
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 active:scale-95'}
+                  `}
+                >
+                  {isDistProcessing ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <Activity className="w-5 h-5" />
+                    </motion.div>
+                  ) : <Play className="w-5 h-5 fill-current" />}
+                  {isDistProcessing ? 'Processing...' : 'Process & Distribute'}
+                </button>
+              </div>
+            </section>
+
+            {/* Results Section */}
+            <AnimatePresence mode="wait">
+              {distResult ? (
+                <motion.section
+                  key="dist-result"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-6"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                    <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Distribution Result</h2>
+                  </div>
+
+                  <div className="space-y-4">
+                    {Object.keys(distResult).length === 0 ? (
+                      <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-600">
+                        No data identified. Ensure session names are followed by profile numbers.
+                      </div>
+                    ) : (
+                      (Object.entries(distResult) as [string, { [sessionName: string]: { [hour: number]: string[] } }][]).map(([dropName, dropData]) => (
+                        <DropResult key={dropName} name={dropName} sessions={dropData} />
+                      ))
+                    )}
+                  </div>
+                </motion.section>
+              ) : (
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                  <Layers className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
+                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
+                    Paste session data to organize it into a 23-hour schedule across one or more drops.
+                  </p>
+                </div>
               )}
-            </button>
-          </div>
-        </section>
-
-        {/* Results Section */}
-        <AnimatePresence mode="wait">
-          {result || flattenedIds ? (
-            <motion.section
-              key="result"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-6"
-            >
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${result ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]'}`} />
-                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
-                  {result ? 'Distribution Result' : 'Tags List'}
-                </h2>
+            </AnimatePresence>
+          </motion.div>
+        ) : mode === 'flatten' ? (
+          <motion.div
+            key="flat-view"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="space-y-12"
+          >
+            {/* Input Section */}
+            <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm">
+              <div className="absolute top-0 right-0 p-4 pointer-events-none">
+                <Terminal className="w-32 h-32 text-zinc-800/10" />
+              </div>
+              
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Tag Extractor Input</h2>
               </div>
 
-              <div className="space-y-4">
-                {result && (
-                  Object.keys(result).length === 0 ? (
-                    <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-600">
-                      No data identified. Ensure session names are followed by profile numbers.
-                    </div>
-                  ) : (
-                    (Object.entries(result) as [string, { [sessionName: string]: { [hour: number]: string[] } }][]).map(([dropName, dropData]) => (
-                      <DropResult key={dropName} name={dropName} sessions={dropData} />
-                    ))
-                  )
-                )}
-                
-                {flattenedIds && (
-                  <FlattenedResult ids={flattenedIds} />
-                )}
+              <textarea
+                value={flatInput}
+                onChange={(e) => setFlatInput(e.target.value)}
+                placeholder="Paste rows with [IDs]...\nExtracts only content within brackets []"
+                className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none"
+              />
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={handleProcessFlat}
+                  disabled={!flatInput.trim() || isFlatProcessing}
+                  className={`
+                    px-8 py-3 rounded-lg flex items-center gap-2 font-display font-medium text-lg transition-all
+                    ${!flatInput.trim() || isFlatProcessing 
+                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50' 
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 active:scale-95'}
+                  `}
+                >
+                  {isFlatProcessing ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <Activity className="w-5 h-5" />
+                    </motion.div>
+                  ) : <Terminal className="w-5 h-5 translate-y-0.5" />}
+                  {isFlatProcessing ? 'Extracting...' : 'Get Tags'}
+                </button>
               </div>
-            </motion.section>
-          ) : (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center"
-            >
-              <Terminal className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-              <p className="text-zinc-600 font-medium max-w-sm mx-auto">
-                Paste session data to organize it into a 23-hour schedule across one or more drops.
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </section>
+
+            {/* Results Section */}
+            <AnimatePresence mode="wait">
+              {flatResult ? (
+                <motion.section
+                  key="flat-result"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-6"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                    <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Tags List</h2>
+                  </div>
+
+                  <FlattenedResult ids={flatResult} />
+                </motion.section>
+              ) : (
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                  <Terminal className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
+                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
+                    Paste raw text containing IDs in brackets [ ] to extract them into a clean list.
+                  </p>
+                </div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="reorg-view"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-12"
+          >
+            {/* Input Section */}
+            <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm">
+              <div className="absolute top-0 right-0 p-4 pointer-events-none">
+                <Activity className="w-32 h-32 text-zinc-800/10" />
+              </div>
+              
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Reorganize Sessions Input</h2>
+              </div>
+
+              <textarea
+                value={reorgInput}
+                onChange={(e) => setReorgInput(e.target.value)}
+                placeholder="CMH15_SNDS 1 [ID] CMH15_Connect 1 [ID] ...\nExtracts and groups sessions vertically while preserving order."
+                className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none"
+              />
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={handleProcessReorg}
+                  disabled={!reorgInput.trim() || isReorgProcessing}
+                  className={`
+                    px-8 py-3 rounded-lg flex items-center gap-2 font-display font-medium text-lg transition-all
+                    ${!reorgInput.trim() || isReorgProcessing 
+                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50' 
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 active:scale-95'}
+                  `}
+                >
+                  {isReorgProcessing ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <Activity className="w-5 h-5" />
+                    </motion.div>
+                  ) : <Activity className="w-5 h-5" />}
+                  {isReorgProcessing ? 'Reorganizing...' : 'Reorganize Sessions'}
+                </button>
+              </div>
+            </section>
+
+            {/* Results Section */}
+            <AnimatePresence mode="wait">
+              {reorgResult ? (
+                <motion.section
+                  key="reorg-result"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-6"
+                >
+                   <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                    <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Reorganized Records</h2>
+                  </div>
+                  <ReorganizedResult data={reorgResult} />
+                </motion.section>
+              ) : (
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                  <Activity className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
+                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
+                    Transform horizontal multi-session rows into clean vertically grouped session records.
+                  </p>
+                </div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
       </div>
 
       <footer className="mt-16 pt-8 border-t border-zinc-900 flex justify-between items-center text-[10px] font-mono text-zinc-700 uppercase tracking-widest">
         <div className="flex items-center gap-4">
-          <span>Engine: Any-String v1.0</span>
+          <span>Engine: Any-String v1.1 Professional</span>
           <span className="w-1 h-1 rounded-full bg-zinc-800" />
-          <span>Status: Active</span>
+          <span>Status: Multi-View Enabled</span>
         </div>
         <div>
           Universal Table & List Parsing Enabled
@@ -619,4 +930,5 @@ export default function App() {
     </div>
   );
 }
+
 
