@@ -63,6 +63,7 @@ function detect_format(input: string): 'multi-drop' | 'single-list' {
  */
 function extract_ids(input: string): string[] {
   const ids: string[] = [];
+  const seenIds = new Set<string>();
   const lines = input.split(/\r?\n/);
   // Match content inside brackets: [ID]
   const bracketRegex = /\[([^\]]+)\]/g;
@@ -70,7 +71,11 @@ function extract_ids(input: string): string[] {
   lines.forEach(line => {
     let match;
     while ((match = bracketRegex.exec(line)) !== null) {
-      ids.push(`[${match[1]}]`);
+      const id = `[${match[1]}]`;
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        ids.push(id);
+      }
     }
   });
   return ids;
@@ -81,6 +86,7 @@ function extract_ids(input: string): string[] {
  */
 function parse_reorganize(input: string): ReorganizedData {
   const result: ReorganizedData = {};
+  const seenIds = new Set<string>();
   const lines = input.split(/\r?\n/);
   // regex: session_name whitespace number whitespace [ID]
   const groupRegex = /(\S+)\s+(\d+)\s+(\[[^\]]+\])/g;
@@ -89,10 +95,13 @@ function parse_reorganize(input: string): ReorganizedData {
     let match;
     while ((match = groupRegex.exec(line)) !== null) {
       const [_, name, number, id] = match;
-      if (!result[name]) {
-        result[name] = [];
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        if (!result[name]) {
+          result[name] = [];
+        }
+        result[name].push({ number, name, id });
       }
-      result[name].push({ number, name, id });
     }
   });
 
@@ -156,15 +165,27 @@ function parse_input(input: string): RawDataEntry[] {
 
 /**
  * Groups raw extracted entries by drop and session.
+ * Deduplicates profiles PER SESSION, keeping only the first occurrence and preserving order.
  */
 function group_sessions(data: RawDataEntry[]): GroupedData {
   const grouped: GroupedData = {};
+  const seenPerSession: { [key: string]: Set<string> } = {};
+
   data.forEach(entry => {
     if (!grouped[entry.dropName]) grouped[entry.dropName] = {};
     if (!grouped[entry.dropName][entry.sessionName]) {
       grouped[entry.dropName][entry.sessionName] = [];
     }
-    grouped[entry.dropName][entry.sessionName].push(entry.profileNumber);
+
+    const key = `${entry.dropName}|${entry.sessionName}`;
+    if (!seenPerSession[key]) {
+      seenPerSession[key] = new Set();
+    }
+
+    if (!seenPerSession[key].has(entry.profileNumber)) {
+      seenPerSession[key].add(entry.profileNumber);
+      grouped[entry.dropName][entry.sessionName].push(entry.profileNumber);
+    }
   });
   return grouped;
 }
