@@ -22,6 +22,7 @@ interface ReorganizedEntry {
   number: string;
   name: string;
   id: string;
+  proxy?: string;
 }
 
 interface ReorganizedData {
@@ -84,13 +85,16 @@ function extract_ids(input: string): string[] {
 
 /**
  * Reorganizes horizontal multi-session rows into vertical grouped records.
+ * Optionally assigns proxies if provided.
  */
-function parse_reorganize(input: string): ReorganizedData {
+function parse_reorganize(input: string, proxyList: string[] = []): ReorganizedData {
   const result: ReorganizedData = {};
   const seenIds = new Set<string>();
   const lines = input.split(/\r?\n/);
   // regex: session_name whitespace number whitespace [ID]
   const groupRegex = /(\S+)\s+(\d+)\s+(\[[^\]]+\])/g;
+
+  const entries: { name: string; number: string; id: string }[] = [];
 
   lines.forEach(line => {
     let match;
@@ -98,12 +102,37 @@ function parse_reorganize(input: string): ReorganizedData {
       const [_, name, number, id] = match;
       if (!seenIds.has(id)) {
         seenIds.add(id);
-        if (!result[name]) {
-          result[name] = [];
-        }
-        result[name].push({ number, name, id });
+        entries.push({ name, number, id });
       }
     }
+  });
+
+  // Proxy Assignment Logic
+  let assignedProxies: string[] = [];
+  if (proxyList.length > 0) {
+    if (proxyList.length >= entries.length) {
+      // Case 1: More or equal proxies -> shuffle and pick unique
+      const shuffled = [...proxyList].sort(() => Math.random() - 0.5);
+      assignedProxies = shuffled.slice(0, entries.length);
+    } else {
+      // Case 2: Fewer proxies -> reuse cyclically
+      assignedProxies = entries.map((_, i) => proxyList[i % proxyList.length]);
+    }
+  }
+
+  entries.forEach((entry, i) => {
+    if (!result[entry.name]) {
+      result[entry.name] = [];
+    }
+    const reorganizedEntry: ReorganizedEntry = { 
+      number: entry.number, 
+      name: entry.name, 
+      id: entry.id 
+    };
+    if (assignedProxies[i]) {
+      reorganizedEntry.proxy = assignedProxies[i];
+    }
+    result[entry.name].push(reorganizedEntry);
   });
 
   return result;
@@ -481,7 +510,7 @@ const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
   const handleCopyAll = () => {
     const all = (Object.values(data) as ReorganizedEntry[][]).flat();
     if (all.length === 0) return;
-    const text = all.map(e => `${e.number}#${e.name}`).join('\n');
+    const text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
     navigator.clipboard.writeText(text);
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
@@ -521,7 +550,12 @@ const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
                 <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
                   <span className="text-zinc-600 w-4 text-right flex-shrink-0">{e.number}</span>
                   <span className="text-zinc-500 truncate flex-1 group-hover:text-zinc-300 transition-colors">{e.name}</span>
-                  <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors">{e.id}</span>
+                  {e.proxy && (
+                    <span className="text-emerald-500 font-mono text-[10px] flex-shrink-0 bg-emerald-500/5 px-1.5 rounded border border-emerald-500/10">
+                      {e.proxy}
+                    </span>
+                  )}
+                  <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors uppercase tracking-tight">{e.id}</span>
                 </div>
               ))}
             </div>
@@ -536,7 +570,7 @@ const SessionCopyIcon: React.FC<{ entries: ReorganizedEntry[] }> = ({ entries })
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    const text = entries.map(e => `${e.number}#${e.name}`).join('\n');
+    const text = entries.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -558,6 +592,7 @@ export default function App() {
 
   // Global Input & Processing State
   const [globalInput, setGlobalInput] = useState('');
+  const [proxyInput, setProxyInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Results State (stored independently)
@@ -569,6 +604,11 @@ export default function App() {
     if (!globalInput.trim()) return;
     
     setIsProcessing(true);
+    
+    const proxies = proxyInput
+      .split(/\r?\n/)
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
     
     // Process everything sequentially with a slight delay for better UX "feel"
     setTimeout(() => {
@@ -585,7 +625,7 @@ export default function App() {
         setFlatResult(ids);
 
         // 3. Process Reorganize
-        const reorgData = parse_reorganize(globalInput);
+        const reorgData = parse_reorganize(globalInput, proxies);
         setReorgResult(reorgData);
 
       } catch (error) {
@@ -622,7 +662,7 @@ export default function App() {
       navigator.clipboard.writeText(flatResult.join('\n'));
     } else if (mode === 'reorganize' && reorgResult) {
       const all = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
-      const text = all.map(e => `${e.number}#${e.name}`).join('\n');
+      const text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
       navigator.clipboard.writeText(text);
     }
   };
@@ -829,6 +869,60 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-12"
           >
+            {/* Reorganize Special Input Section */}
+            <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-8 backdrop-blur-sm shadow-xl">
+              <div className="flex flex-col gap-8">
+                {/* Main Input Reminder/Access */}
+                <div className="space-y-3">
+                   <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-zinc-500" />
+                    <label className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-[0.2em]">Main Session Input</label>
+                  </div>
+                  <div className="p-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg text-xs text-zinc-500 italic">
+                    Using global input from above. 
+                    {globalInput ? ` (${globalInput.split('\n').filter(l => l.trim()).length} lines detected)` : ' (No input detected)'}
+                  </div>
+                </div>
+
+                {/* Proxy Input */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-500" />
+                      <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-[0.2em]">Proxy Input (Optional)</label>
+                    </div>
+                    {proxyInput && (
+                      <span className="text-[10px] font-mono text-zinc-600">
+                        {proxyInput.split('\n').filter(p => p.trim()).length} PROXIES
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    value={proxyInput}
+                    onChange={(e) => setProxyInput(e.target.value)}
+                    placeholder="50.3.117.98:92\n185.40.18.76:92\nPaste proxy list IP:PORT format..."
+                    className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
+                  />
+                </div>
+
+                <div className="flex justify-center pt-2">
+                  <button
+                    onClick={handleGenerateAll}
+                    disabled={!globalInput.trim() || isProcessing}
+                    className={`
+                      px-16 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all
+                      ${!globalInput.trim() || isProcessing 
+                        ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl shadow-indigo-600/30 active:scale-[0.98]'}
+                    `}
+                  >
+                    {isProcessing ? <Activity className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6 fill-current" />}
+                    {isProcessing ? 'PROCESSING...' : 'GENERATE'}
+                  </button>
+                </div>
+              </div>
+            </section>
+
             {/* Results Section */}
             <AnimatePresence mode="wait">
               {reorgResult ? (
@@ -848,7 +942,7 @@ export default function App() {
                 <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
                   <Activity className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
                   <p className="text-zinc-600 font-medium max-w-sm mx-auto">
-                    Click Generate to transform horizontal rows into vertical grouped records.
+                    Click Generate to transform horizontal rows into vertical grouped records with proxies.
                   </p>
                 </div>
               )}
