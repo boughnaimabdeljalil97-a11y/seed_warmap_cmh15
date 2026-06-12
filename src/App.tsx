@@ -11,12 +11,23 @@ import {
   Terminal,
   Activity,
   FileJson,
-  ArrowRight
+  ArrowRight,
+  Columns
 } from 'lucide-react';
 
 // --- Types ---
 
-type ProcessingMode = 'distribution' | 'flatten' | 'reorganize';
+type ProcessingMode = 'distribution' | 'flatten' | 'reorganize' | 'divide';
+
+interface DivideProfileEntry {
+  tagName: string;
+  profileNumber: number;
+  id: string;
+}
+
+interface DivideResultData {
+  [tagName: string]: DivideProfileEntry[];
+}
 
 interface ReorganizedEntry {
   number: string;
@@ -258,6 +269,199 @@ function split_into_23_hours(grouped: GroupedData): DistributedData {
 function format_output(result: DistributedData): DistributedData {
   return result;
 }
+
+/**
+ * Utility to parse intervals mapping horizontally.
+ */
+function parse_intervals(intervalsInput: string): { [tagName: string]: { min: number; max: number } } {
+  const lines = intervalsInput.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const mapping: { [tagName: string]: { min: number; max: number } } = {};
+  if (lines.length < 2) return mapping;
+
+  const splitTags = lines[0].includes('\t') ? lines[0].split('\t') : lines[0].split(/\s+/);
+  const splitIntervals = lines[1].includes('\t') ? lines[1].split('\t') : lines[1].split(/\s+/);
+
+  const tags = splitTags.map(t => t.trim()).filter(t => t.length > 0);
+  const intervals = splitIntervals.map(i => i.trim()).filter(i => i.length > 0);
+
+  for (let idx = 0; idx < Math.min(tags.length, intervals.length); idx++) {
+    const tagName = tags[idx];
+    const intervalStr = intervals[idx];
+    const match = intervalStr.match(/^(\d+)-(\d+)$/);
+    if (match) {
+      const min = parseInt(match[1], 10);
+      const max = parseInt(match[2], 10);
+      mapping[tagName] = { min, max };
+    }
+  }
+  return mapping;
+}
+
+/**
+ * Main logical processing function for Divide Tags feature.
+ */
+function process_divide_tags(sessionData: string, intervalsData: string): DivideResultData {
+  const result: DivideResultData = {};
+  const intervalMapping = parse_intervals(intervalsData);
+  
+  const lines = sessionData.split(/\r?\n/);
+  const lineRegex = /(\S+)\s+(\d+)\s+(\[[^\]]+\])/;
+  
+  const entriesByTag: { [tag: string]: { tagName: string; profileNumber: number; id: string }[] } = {};
+  
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const match = trimmed.match(lineRegex);
+    if (match) {
+      const [_, tagName, numStr, id] = match;
+      const profileNumber = parseInt(numStr, 10);
+      if (!entriesByTag[tagName]) {
+        entriesByTag[tagName] = [];
+      }
+      entriesByTag[tagName].push({ tagName, profileNumber, id });
+    }
+  });
+
+  Object.keys(entriesByTag).forEach(tagName => {
+    const profiles = entriesByTag[tagName];
+    profiles.sort((a, b) => a.profileNumber - b.profileNumber);
+    
+    const interval = intervalMapping[tagName];
+    if (interval) {
+      const filtered = profiles.filter(p => p.profileNumber >= interval.min && p.profileNumber <= interval.max);
+      if (filtered.length > 0) {
+        result[tagName] = filtered;
+      }
+    } else {
+      result[tagName] = profiles;
+    }
+  });
+
+  return result;
+}
+
+/**
+ * String formatter for results to be copied.
+ */
+function format_divide_output(data: DivideResultData): string {
+  const parts: string[] = [];
+  const tagNames = Object.keys(data);
+  
+  tagNames.forEach(tagName => {
+    const profiles = data[tagName];
+    const sortedProfiles = [...profiles].sort((a, b) => a.profileNumber - b.profileNumber);
+    const profileLines = sortedProfiles.map(p => `${p.tagName}\t${p.profileNumber}\t${p.id}`).join('\n');
+    if (profileLines) {
+      parts.push(profileLines);
+    }
+  });
+  
+  return parts.join('\n');
+}
+
+/**
+ * Formats divided data horizontally specifically for pasting into Google Sheets or Excel.
+ * Each tag occupies exactly 3 columns: Tag Name | Profile Number | Profile ID
+ * Sorted in the strict ordered sequence of 8 predefined tags.
+ * Outputs ONLY raw data rows without any headers, column labels, empty separators, or totals.
+ */
+function format_divide_sheets_output(data: DivideResultData): string {
+  const FIXED_TAGS_ORDER = [
+    'CMH15_SNDS',
+    'CMH15_Connect_fresh',
+    'CMH15_CONNECT_hotmail',
+    'CMH15_hotmail_2',
+    'CMH15_hotmail_3',
+    'CMH15_hotmail_4',
+    'CMH15_warmup_1',
+    'CMH15_warmup_2'
+  ];
+
+  const sortedData: { [tagName: string]: DivideProfileEntry[] } = {};
+  FIXED_TAGS_ORDER.forEach(tagName => {
+    const list = data[tagName] || [];
+    sortedData[tagName] = [...list].sort((a, b) => a.profileNumber - b.profileNumber);
+  });
+
+  const lines: string[] = [];
+
+  // Aligned rows based on index
+  const maxProfilesCount = Math.max(...FIXED_TAGS_ORDER.map(tagName => sortedData[tagName].length), 0);
+  if (maxProfilesCount === 0) return "";
+
+  for (let v = 0; v < maxProfilesCount; v++) {
+    const rowCells: string[] = [];
+    FIXED_TAGS_ORDER.forEach(tagName => {
+      const profile = sortedData[tagName][v];
+      if (profile) {
+        rowCells.push(profile.tagName, String(profile.profileNumber), profile.id);
+      } else {
+        rowCells.push("", "", "");
+      }
+    });
+    lines.push(rowCells.join('\t'));
+  }
+
+  return lines.join('\n');
+}
+
+const DivideResultDisplay: React.FC<{ data: DivideResultData }> = ({ data }) => {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {(Object.entries(data) as [string, DivideProfileEntry[]][]).map(([tagName, profiles]) => {
+        const sortedProfiles = [...profiles].sort((a, b) => a.profileNumber - b.profileNumber);
+        
+        return (
+          <div key={tagName} className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm">
+            <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-4 bg-teal-500 rounded-full" />
+                <span className="font-display font-semibold text-zinc-200 tracking-tight">{tagName}</span>
+                <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded font-mono">
+                  {profiles.length} Profiles
+                </span>
+              </div>
+              <DivideGroupCopyBtn tagName={tagName} profiles={profiles} />
+            </div>
+            
+            <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1">
+              {sortedProfiles.map((p, i) => (
+                <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
+                  <span className="text-zinc-600 w-8 text-right flex-shrink-0">{p.profileNumber}</span>
+                  <span className="text-zinc-350 truncate flex-1 font-semibold">{p.tagName}</span>
+                  <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors uppercase tracking-tight font-mono">{p.id}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const DivideGroupCopyBtn: React.FC<{ tagName: string; profiles: DivideProfileEntry[] }> = ({ tagName, profiles }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const sortedProfiles = [...profiles].sort((a, b) => a.profileNumber - b.profileNumber);
+    const profileLines = sortedProfiles.map(p => `${p.tagName}\t${p.profileNumber}\t${p.id}`).join('\n');
+    navigator.clipboard.writeText(profileLines);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button 
+      onClick={handleCopy} 
+      title="Copy this group"
+      className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-500 hover:text-blue-400 hover:bg-zinc-800'}`}
+    >
+      <ClipboardCopy className="w-4 h-4" />
+    </button>
+  );
+};
 
 // --- UI Components ---
 
@@ -600,6 +804,44 @@ export default function App() {
   const [flatResult, setFlatResult] = useState<string[] | null>(null);
   const [reorgResult, setReorgResult] = useState<ReorganizedData | null>(null);
 
+  // Divide State
+  const [divideInput, setDivideInput] = useState('');
+  const [divideIntervals, setDivideIntervals] = useState('');
+  const [divideResult, setDivideResult] = useState<DivideResultData | null>(null);
+  const [isDivideProcessing, setIsDivideProcessing] = useState(false);
+
+  const handleGenerateDivide = () => {
+    if (!divideInput.trim() || !divideIntervals.trim()) return;
+    setIsDivideProcessing(true);
+    setTimeout(() => {
+      try {
+        const result = process_divide_tags(divideInput, divideIntervals);
+        setDivideResult(result);
+      } catch (error) {
+        console.error("Divide error:", error);
+        alert("Failed to divide tags. Check console for details.");
+      } finally {
+        setIsDivideProcessing(false);
+      }
+    }, 400);
+  };
+
+  const handleCopyDivideOutput = () => {
+    if (!divideResult) return;
+    const text = format_divide_output(divideResult);
+    navigator.clipboard.writeText(text);
+  };
+
+  const [copiedSheets, setCopiedSheets] = useState(false);
+
+  const handleCopyDivideSheets = () => {
+    if (!divideResult) return;
+    const text = format_divide_sheets_output(divideResult);
+    navigator.clipboard.writeText(text);
+    setCopiedSheets(true);
+    setTimeout(() => setCopiedSheets(false), 2000);
+  };
+
   const handleGenerateAll = () => {
     if (!globalInput.trim()) return;
     
@@ -653,6 +895,9 @@ export default function App() {
     setDistResult(null);
     setFlatResult(null);
     setReorgResult(null);
+    setDivideInput('');
+    setDivideIntervals('');
+    setDivideResult(null);
   };
 
   const handleCopyResult = () => {
@@ -663,6 +908,9 @@ export default function App() {
     } else if (mode === 'reorganize' && reorgResult) {
       const all = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
       const text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
+      navigator.clipboard.writeText(text);
+    } else if (mode === 'divide' && divideResult) {
+      const text = format_divide_output(divideResult);
       navigator.clipboard.writeText(text);
     }
   };
@@ -686,7 +934,7 @@ export default function App() {
         </div>
 
         <div className="flex gap-2">
-          {((mode === 'distribution' && distResult) || (mode === 'flatten' && flatResult) || (mode === 'reorganize' && reorgResult)) && (
+          {((mode === 'distribution' && distResult) || (mode === 'flatten' && flatResult) || (mode === 'reorganize' && reorgResult) || (mode === 'divide' && divideResult)) && (
             <>
               {mode === 'distribution' && distResult && (
                 <button 
@@ -697,12 +945,21 @@ export default function App() {
                   Export JSON
                 </button>
               )}
+              {mode === 'divide' && divideResult && (
+                <button 
+                  onClick={handleCopyDivideSheets}
+                  className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-emerald-500 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-emerald-400"
+                >
+                  <ClipboardCopy className="w-4 h-4 text-emerald-500/80" />
+                  {copiedSheets ? 'Copied!' : 'Copy All'}
+                </button>
+              )}
               <button 
                 onClick={handleCopyResult}
                 className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
               >
                 <ClipboardCopy className="w-4 h-4 text-zinc-400" />
-                {mode === 'distribution' ? 'Copy JSON' : mode === 'flatten' ? 'Copy All Tags' : 'Copy All Reordered'}
+                {mode === 'distribution' ? 'Copy JSON' : mode === 'flatten' ? 'Copy All Tags' : mode === 'reorganize' ? 'Copy All Reordered' : 'Copy Divided Tags'}
               </button>
             </>
           )}
@@ -717,49 +974,51 @@ export default function App() {
       </header>
 
       {/* Global Input Section */}
-      <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm mb-12">
-        <div className="absolute top-0 right-0 p-4 pointer-events-none">
-          <Play className="w-32 h-32 text-zinc-800/10" />
-        </div>
-        
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-          <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Global Session Input</h2>
-        </div>
+      {mode !== 'divide' && (
+        <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm mb-12">
+          <div className="absolute top-0 right-0 p-4 pointer-events-none">
+            <Play className="w-32 h-32 text-zinc-800/10" />
+          </div>
+          
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+            <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Global Session Input</h2>
+          </div>
 
-        <textarea
-          value={globalInput}
-          onChange={(e) => setGlobalInput(e.target.value)}
-          placeholder="Paste all your session data here... (session_name number [ID])" 
-          className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
-        />
+          <textarea
+            value={globalInput}
+            onChange={(e) => setGlobalInput(e.target.value)}
+            placeholder="Paste all your session data here... (session_name number [ID])" 
+            className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
+          />
 
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleGenerateAll}
-            disabled={!globalInput.trim() || isProcessing}
-            className={`
-              px-12 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all
-              ${!globalInput.trim() || isProcessing 
-                ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed opacity-50' 
-                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-600/30 active:scale-[0.98] animate-in'}
-            `}
-          >
-            {isProcessing ? (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-              >
-                <Activity className="w-6 h-6" />
-              </motion.div>
-            ) : <Play className="w-6 h-6 fill-current" />}
-            {isProcessing ? 'PROCESSING ALL...' : 'GENERATE'}
-          </button>
-        </div>
-      </section>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleGenerateAll}
+              disabled={!globalInput.trim() || isProcessing}
+              className={`
+                px-12 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all
+                ${!globalInput.trim() || isProcessing 
+                  ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed opacity-50' 
+                  : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-600/30 active:scale-[0.98] animate-in'}
+              `}
+            >
+              {isProcessing ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                >
+                  <Activity className="w-6 h-6" />
+                </motion.div>
+              ) : <Play className="w-6 h-6 fill-current" />}
+              {isProcessing ? 'PROCESSING ALL...' : 'GENERATE'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Mode Selector (Tabs) */}
-      <div className="flex bg-zinc-900/50 p-1.5 rounded-xl border border-zinc-800 mb-8 w-fit">
+      <div className="flex flex-wrap bg-zinc-900/50 p-1.5 rounded-xl border border-zinc-800 mb-8 w-fit gap-1">
         <button
           onClick={() => setMode('distribution')}
           className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'distribution' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
@@ -780,6 +1039,13 @@ export default function App() {
         >
           <Activity className="w-4 h-4" />
           Reorganize Sessions
+        </button>
+        <button
+          onClick={() => setMode('divide')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'divide' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
+        >
+          <Columns className="w-4 h-4" />
+          Divide Tags
         </button>
       </div>
 
@@ -862,7 +1128,7 @@ export default function App() {
               )}
             </AnimatePresence>
           </motion.div>
-        ) : (
+        ) : mode === 'reorganize' ? (
           <motion.div
             key="reorg-view"
             initial={{ opacity: 0, y: 10 }}
@@ -943,6 +1209,151 @@ export default function App() {
                   <Activity className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
                   <p className="text-zinc-600 font-medium max-w-sm mx-auto">
                     Click Generate to transform horizontal rows into vertical grouped records with proxies.
+                  </p>
+                </div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="divide-view"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="space-y-12"
+          >
+            {/* Input Section */}
+            <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-8 backdrop-blur-sm shadow-xl">
+              <div className="flex flex-col gap-8">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Divide Tags Configuration</h2>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Session Input */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-zinc-500" />
+                        <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-[0.2em]">Session Data</label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {globalInput && !divideInput && (
+                          <button
+                            type="button"
+                            onClick={() => setDivideInput(globalInput)}
+                            className="text-[9px] font-mono font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-1.5 py-0.5 rounded transition-all"
+                          >
+                            Load Global Session Input
+                          </button>
+                        )}
+                        {divideInput && (
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {divideInput.split('\n').filter(l => l.trim()).length} RECORDS
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <textarea
+                      value={divideInput}
+                      onChange={(e) => setDivideInput(e.target.value)}
+                      placeholder="CMH15_SNDS	2208	[B4DB7B48FF10353B]&#10;Paste TAG_NAME	PROFILE_NAME	[ID]..."
+                      className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
+                    />
+                  </div>
+
+                  {/* Intervals Input */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-zinc-500" />
+                        <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-[0.2em]">Interval Mapping</label>
+                      </div>
+                      {divideIntervals && (
+                        <span className="text-[10px] font-mono text-zinc-600">
+                          {parse_intervals(divideIntervals) ? Object.keys(parse_intervals(divideIntervals)).length : 0} MAPS
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={divideIntervals}
+                      onChange={(e) => setDivideIntervals(e.target.value)}
+                      placeholder="CMH15_SNDS	CMH15_Connect_fresh&#10;1-234	1-235&#10;Paste intervals horizontally..."
+                      className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap justify-center gap-4 pt-2">
+                  <button
+                    onClick={handleGenerateDivide}
+                    disabled={!divideInput.trim() || !divideIntervals.trim() || isDivideProcessing}
+                    className={`
+                      px-12 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-lg transition-all
+                      ${!divideInput.trim() || !divideIntervals.trim() || isDivideProcessing 
+                        ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl shadow-indigo-600/30 active:scale-[0.98]'}
+                    `}
+                  >
+                    {isDivideProcessing ? <Activity className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
+                    {isDivideProcessing ? 'PROCESSING...' : 'GENERATE'}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setDivideInput('');
+                      setDivideIntervals('');
+                      setDivideResult(null);
+                    }}
+                    className="px-6 py-4 bg-zinc-900 border border-zinc-800 hover:border-red-900/50 hover:bg-red-950/20 text-zinc-400 hover:text-red-400 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear Inputs
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Results Section */}
+            <AnimatePresence mode="wait">
+              {divideResult ? (
+                <motion.section
+                  key="divide-result"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-6"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                      <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Divided Results</h2>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleCopyDivideSheets}
+                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-bold uppercase tracking-wider transition-all text-white shadow-md active:scale-[0.98] flex items-center gap-2 transition-all"
+                      >
+                        <ClipboardCopy className="w-4 h-4 text-emerald-100" />
+                        {copiedSheets ? 'COPIED!' : 'Copy All'}
+                      </button>
+                      <button
+                        onClick={handleCopyDivideOutput}
+                        className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-lg text-sm font-bold uppercase tracking-wider transition-all text-white shadow-lg flex items-center gap-2"
+                      >
+                        <ClipboardCopy className="w-4 h-4 text-zinc-400" />
+                        Copy Output
+                      </button>
+                    </div>
+                  </div>
+
+                  <DivideResultDisplay data={divideResult} />
+                </motion.section>
+              ) : (
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                  <Columns className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
+                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
+                    Configure Session Data and Interval Mapping above, then click Generate to divide tags.
                   </p>
                 </div>
               )}
