@@ -12,7 +12,8 @@ import {
   Activity,
   FileJson,
   ArrowRight,
-  Columns
+  Columns,
+  Ban
 } from 'lucide-react';
 
 // --- Types ---
@@ -147,6 +148,24 @@ function parse_reorganize(input: string, proxyList: string[] = []): ReorganizedD
   });
 
   return result;
+}
+
+/**
+ * Extracts set of unique IP:PORT proxies from input text.
+ * Prevents crashes and filters out random text.
+ */
+function extract_excluded_proxies(input: string): Set<string> {
+  const excluded = new Set<string>();
+  if (!input.trim()) return excluded;
+
+  const ipPortRegex = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b/g;
+  const matches = input.match(ipPortRegex);
+  if (matches) {
+    matches.forEach(m => {
+      excluded.add(m.trim());
+    });
+  }
+  return excluded;
 }
 
 /**
@@ -797,6 +816,7 @@ export default function App() {
   // Global Input & Processing State
   const [globalInput, setGlobalInput] = useState('');
   const [proxyInput, setProxyInput] = useState('');
+  const [excludedProxyInput, setExcludedProxyInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Results State (stored independently)
@@ -867,7 +887,14 @@ export default function App() {
         setFlatResult(ids);
 
         // 3. Process Reorganize
-        const reorgData = parse_reorganize(globalInput, proxies);
+        const excludedProxies = extract_excluded_proxies(excludedProxyInput);
+        let filteredProxies = proxies;
+        if (excludedProxies.size > 0) {
+          filteredProxies = proxies.filter(p => !excludedProxies.has(p));
+          setProxyInput(filteredProxies.join('\n'));
+        }
+
+        const reorgData = parse_reorganize(globalInput, filteredProxies);
         setReorgResult(reorgData);
 
       } catch (error) {
@@ -892,6 +919,7 @@ export default function App() {
 
   const handleClear = () => {
     setGlobalInput('');
+    setExcludedProxyInput('');
     setDistResult(null);
     setFlatResult(null);
     setReorgResult(null);
@@ -1150,7 +1178,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Proxy Input */}
+                 {/* Proxy Input */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1168,6 +1196,34 @@ export default function App() {
                     onChange={(e) => setProxyInput(e.target.value)}
                     placeholder="50.3.117.98:92\n185.40.18.76:92\nPaste proxy list IP:PORT format..."
                     className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
+                  />
+                </div>
+
+                {/* Excluded / Overused Proxies */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Ban className="w-4 h-4 text-rose-500" />
+                      <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-[0.2em]">Excluded / Overused Proxies (Optional)</label>
+                    </div>
+                    {excludedProxyInput && (
+                      <span className="text-[10px] font-mono text-rose-500">
+                        {(() => {
+                          const count = new Set();
+                          const matches = excludedProxyInput.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b/g);
+                          if (matches) {
+                            matches.forEach(m => count.add(m.trim()));
+                          }
+                          return count.size;
+                        })()} EXCLUDED
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    value={excludedProxyInput}
+                    onChange={(e) => setExcludedProxyInput(e.target.value)}
+                    placeholder="• Proxy IP: 15.235.17.147:92 exceeds limit: 60...\nPaste any text or reports containing proxies to exclude..."
+                    className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/20 transition-all resize-none shadow-inner"
                   />
                 </div>
 
