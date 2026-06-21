@@ -574,6 +574,18 @@ const DropResult: React.FC<{
     return null; // hide drop if no matching sessions
   }
 
+  const sessionCount = filteredSessions.length;
+  let gridClasses = "p-6 grid gap-6 bg-zinc-900/5";
+  if (sessionCount === 1) {
+    gridClasses += " grid-cols-1 max-w-2xl mx-auto";
+  } else if (sessionCount === 2) {
+    gridClasses += " grid-cols-1 sm:grid-cols-2 max-w-5xl mx-auto";
+  } else {
+    gridClasses += " grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+  }
+
+  const displayName = name.toUpperCase().replace(/\bDROP\b/g, "BATCH");
+
   return (
     <div className="border border-zinc-900 rounded-2xl mb-8 overflow-hidden bg-zinc-950/20 backdrop-blur-sm shadow-sm transition-all">
       <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-4.5 bg-zinc-900/30 border-b border-zinc-900/60 gap-3">
@@ -585,7 +597,7 @@ const DropResult: React.FC<{
             <Layers className="w-4 h-4 text-blue-500" />
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <span className="font-display font-bold text-zinc-100 tracking-tight text-[17px] leading-tight group-hover/btn:text-blue-450 transition-colors uppercase">{name}</span>
+            <span className="font-display font-bold text-zinc-100 tracking-tight text-[17px] leading-tight group-hover/btn:text-blue-450 transition-colors uppercase">{displayName}</span>
             <span className="text-[10px] bg-zinc-900/80 border border-zinc-800/60 text-zinc-450 px-2.5 py-0.5 rounded-full font-semibold font-mono self-start sm:self-auto leading-none">
               {Object.keys(sessions).length} Sessions
             </span>
@@ -593,23 +605,9 @@ const DropResult: React.FC<{
         </button>
 
         <div className="flex items-center gap-2.5 self-end sm:self-auto">
-          <button
-            onClick={handleCopyDrop}
-            title="Copy entire drop data"
-            className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider transition-all border
-              ${copiedDrop 
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-sm' 
-                : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border-zinc-800 hover:border-zinc-700'}
-            `}
-          >
-            <ClipboardCopy className="w-3.5 h-3.5 text-zinc-500" />
-            {copiedDrop ? 'Copied Drop' : 'Copy Drop'}
-          </button>
-          
           <button 
             onClick={() => setIsOpen(!isOpen)}
-            className="p-1.5 rounded-lg bg-zinc-905/60 hover:bg-zinc-805 border border-zinc-800 hover:border-zinc-700 text-zinc-450 hover:text-zinc-200 transition-colors"
+            className="p-1.5 rounded-lg bg-zinc-905/60 hover:bg-zinc-855 border border-zinc-800 hover:border-zinc-700 text-zinc-450 hover:text-zinc-200 transition-colors"
             aria-label="Toggle Details"
           >
             {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -623,7 +621,7 @@ const DropResult: React.FC<{
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 bg-zinc-900/10"
+            className={gridClasses}
           >
             {filteredSessions.map(([sessionName, hourlyData]) => (
               <SessionCard key={sessionName} name={sessionName} hours={hourlyData} onShowToast={onShowToast} />
@@ -662,7 +660,7 @@ const SessionCard: React.FC<{
   const category = getSessionCategory(name);
 
   return (
-    <div className="relative bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/60 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-zinc-900/50 transition-all flex flex-col justify-between gap-3.5 h-full group/card overflow-visible">
+    <div className="relative bg-zinc-900 border border-zinc-800/80 hover:border-zinc-700/80 rounded-xl p-4.5 shadow-md hover:shadow-lg hover:bg-zinc-900/95 transition-all flex flex-col justify-between gap-4 h-full group/card overflow-visible">
       {/* Category accent line on top */}
       <div className={`absolute top-0 left-0 right-0 h-[3px] ${category.colorClass} opacity-60 rounded-t-xl`} />
 
@@ -682,16 +680,24 @@ const SessionCard: React.FC<{
         </div>
       </div>
 
-      {/* Row 2: Clean 2-column metrics row (From / To) */}
-      <div className="w-full bg-zinc-950/20 border border-zinc-900/40 rounded-lg p-2.5">
-        <div className="grid grid-cols-2 gap-4">
+      {/* Row 2: Directional range display */}
+      <div className="w-full bg-zinc-950/40 border border-zinc-850/50 rounded-lg p-3">
+        <div className="flex items-center justify-between">
+          {/* From Column */}
           <div className="flex flex-col">
-            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase">From</span>
-            <span className="text-xs font-semibold text-zinc-100 mt-0.5 tabular-nums">{minProfile}</span>
+            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase select-none">From</span>
+            <span className="text-sm font-bold text-zinc-100 mt-0.5 tabular-nums">{minProfile}</span>
           </div>
-          <div className="flex flex-col">
-            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase">To</span>
-            <span className="text-xs font-semibold text-zinc-100 mt-0.5 tabular-nums">{maxProfile}</span>
+
+          {/* Directional Range Flow */}
+          <div className="flex-1 flex items-center justify-center px-4 select-none">
+            <span className="text-zinc-600 font-mono text-xs font-bold tracking-widest">───▶</span>
+          </div>
+
+          {/* To Column */}
+          <div className="flex flex-col text-right">
+            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase select-none">To</span>
+            <span className="text-sm font-bold text-zinc-100 mt-0.5 tabular-nums">{maxProfile}</span>
           </div>
         </div>
       </div>
@@ -704,7 +710,7 @@ const SessionCard: React.FC<{
             w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider transition-all border
             ${copiedAll 
               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25 shadow-sm' 
-              : 'bg-zinc-900/60 text-zinc-450 hover:text-blue-450 hover:bg-blue-500/10 border-zinc-800 hover:border-blue-500/20'}
+              : 'bg-zinc-800/60 text-zinc-300 hover:text-blue-400 hover:bg-blue-500/10 border-zinc-750 hover:border-blue-500/20'}
           `}
         >
           <ClipboardCopy className="w-3.5 h-3.5" />
@@ -1328,9 +1334,9 @@ export default function App() {
                 <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Profiles</div>
                 <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalProfiles}</div>
               </div>
-              {/* Card 3: Total Drops */}
+              {/* Card 3: Total Batches */}
               <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
-                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Drops</div>
+                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Batches</div>
                 <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalDrops || "—"}</div>
               </div>
               {/* Card 4: Proxy Status: Total */}
