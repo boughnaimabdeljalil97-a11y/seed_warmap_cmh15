@@ -509,7 +509,7 @@ const DropResult: React.FC<{ name: string; sessions: { [sessionName: string]: { 
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="p-6 space-y-8"
+            className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
           >
             {(Object.entries(sessions) as [string, { [hour: number]: string[] }][])
               .map(([sessionName, hourlyData]) => (
@@ -523,7 +523,6 @@ const DropResult: React.FC<{ name: string; sessions: { [sessionName: string]: { 
 };
 
 const SessionCard: React.FC<{ name: string; hours: { [hour: number]: string[] } }> = ({ name, hours }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
 
   // Flattened profiles to get min/max for the range display
@@ -541,125 +540,46 @@ const SessionCard: React.FC<{ name: string; hours: { [hour: number]: string[] } 
   };
 
   return (
-    <div className="bg-zinc-950/30 border border-zinc-800/80 rounded-xl overflow-hidden shadow-sm group/card">
-      <button 
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors text-left relative"
-      >
-        {/* Left: Session Info */}
-        <div className="flex items-center gap-4 min-w-0 flex-1">
-          <div className={`w-1.5 h-10 rounded-full transition-colors flex-shrink-0 ${isExpanded ? 'bg-blue-600' : 'bg-zinc-700'}`} />
-          <div className="min-w-0">
-            <h3 className="text-lg font-display font-medium text-zinc-200 tracking-tight truncate leading-tight mb-1" title={name}>
-              {name}
-            </h3>
-            <span className="text-[10px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded uppercase font-bold tracking-wider">
-              {allProfiles.length} Total Profiles
-            </span>
-          </div>
-        </div>
-
-        {/* Center: Range Info (Large & Centered) */}
-        <div className="hidden lg:flex flex-[2] items-center justify-center px-4">
-          <div className="flex items-center gap-6 px-8 py-2.5 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] group-hover/card:bg-zinc-800/80 transition-all duration-300">
-            <div className="flex flex-col items-center">
-              <span className="text-[9px] font-mono font-black text-zinc-600 uppercase tracking-[0.25em] mb-1">From</span>
-              <span className="text-xl font-display font-bold text-white tabular-nums tracking-tight">{minProfile}</span>
-            </div>
-            
-            <div className="flex items-center text-zinc-800">
-               <div className="w-8 h-[1px] bg-zinc-800" />
-               <ArrowRight className="w-5 h-5 text-blue-500/40 mx-2" />
-               <div className="w-8 h-[1px] bg-zinc-800" />
-            </div>
-            
-            <div className="flex flex-col items-center">
-              <span className="text-[9px] font-mono font-black text-zinc-600 uppercase tracking-[0.25em] mb-1">To</span>
-              <span className="text-xl font-display font-bold text-white tabular-nums tracking-tight">{maxProfile}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Actions */}
-        <div className="flex items-center gap-3 flex-shrink-0 flex-1 justify-end">
-          <button
-            onClick={handleCopyAll}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all
-              ${copiedAll 
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                : 'bg-zinc-900 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 border border-zinc-800 hover:border-blue-500/30'}
-            `}
-          >
-            <ClipboardCopy className="w-3.5 h-3.5" />
-            {copiedAll ? 'Copied' : 'Copy All'}
-          </button>
-          <div className={`p-1 rounded-full transition-colors ${isExpanded ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-600'}`}>
-            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </div>
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-zinc-800/50"
-          >
-            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {(Object.entries(hours) as [string, string[]][]).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).map(([hour, profiles]) => (
-                <HourBox key={hour} hour={parseInt(hour)} profiles={profiles} />
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const HourBox: React.FC<{ hour: number; profiles: string[] }> = ({ hour, profiles }) => {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (profiles.length === 0) return;
-    const text = profiles.join('\n');
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <div 
-      onClick={handleCopy}
-      className={`
-        group relative cursor-pointer p-3 rounded-lg border transition-all duration-200
-        ${profiles.length > 0 
-          ? 'bg-zinc-900 border-zinc-800 hover:border-blue-500/50 hover:bg-zinc-800/80' 
-          : 'bg-zinc-950 border-zinc-900 opacity-40 cursor-not-allowed'}
-      `}
-    >
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-tighter">Hour {hour}</span>
-        <span className={`text-[10px] font-mono px-1 rounded ${profiles.length > 0 ? 'bg-zinc-800 text-zinc-400' : 'text-zinc-700'}`}>
-          {profiles.length}
-        </span>
-      </div>
-      
-      <div className="text-[11px] font-mono text-zinc-400 line-clamp-2 break-all leading-tight">
-        {profiles.length > 0 ? `[${profiles.join(', ')}]` : '[empty]'}
+    <div className="bg-zinc-950/40 border border-zinc-800/80 rounded-xl p-5 shadow-sm hover:border-zinc-700/80 hover:bg-zinc-950/60 transition-all flex flex-col justify-between gap-4 h-full group/card">
+      <div className="space-y-2">
+        {/* Session Name */}
+        <h3 className="text-base font-display font-semibold text-zinc-200 tracking-tight truncate leading-tight" title={name}>
+          {name}
+        </h3>
+        
+        {/* Total Profiles Label */}
+        <p className="text-xs font-mono text-zinc-400">
+          Total Profiles: <span className="font-bold text-zinc-200">{allProfiles.length}</span>
+        </p>
       </div>
 
-      {/* Hover/Copy Tooltip */}
-      {profiles.length > 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-blue-600/10 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
-          <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest bg-zinc-950 px-2 py-1 rounded border border-blue-500/30 shadow-xl">
-            {copied ? 'Copied!' : 'Click to Copy'}
-          </span>
+      {/* FROM / TO Range Table Display */}
+      <div className="w-full bg-zinc-900/40 border border-zinc-800/80 rounded-lg p-3">
+        <div className="grid grid-cols-2 text-center border-b border-zinc-800/60 pb-1.5 mb-2">
+          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest">FROM</span>
+          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest">TO</span>
         </div>
-      )}
+        <div className="grid grid-cols-2 text-center">
+          <span className="text-base font-mono font-bold text-white tabular-nums">{minProfile}</span>
+          <span className="text-base font-mono font-bold text-white tabular-nums">{maxProfile}</span>
+        </div>
+      </div>
+
+      {/* Copy All Button */}
+      <div>
+        <button
+          onClick={handleCopyAll}
+          className={`
+            w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all
+            ${copiedAll 
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+              : 'bg-zinc-900 text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 border border-zinc-800 hover:border-blue-500/30'}
+          `}
+        >
+          <ClipboardCopy className="w-3.5 h-3.5" />
+          {copiedAll ? 'Copied' : 'Copy All'}
+        </button>
+      </div>
     </div>
   );
 };
