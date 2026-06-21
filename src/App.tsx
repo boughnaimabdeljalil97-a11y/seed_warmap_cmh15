@@ -13,7 +13,9 @@ import {
   FileJson,
   ArrowRight,
   Columns,
-  Ban
+  Ban,
+  Search,
+  Download
 } from 'lucide-react';
 
 // --- Types ---
@@ -425,26 +427,60 @@ function format_divide_sheets_output(data: DivideResultData): string {
   return lines.join('\n');
 }
 
-const DivideResultDisplay: React.FC<{ data: DivideResultData }> = ({ data }) => {
+const getSessionCategory = (name: string) => {
+  const lower = name.toLowerCase();
+  if (lower.includes('yahoo')) {
+    return { label: 'Yahoo', colorClass: 'bg-purple-500', textClass: 'text-purple-400', borderClass: 'border-purple-500/20 bg-purple-500/5' };
+  }
+  if (lower.includes('hotmail')) {
+    return { label: 'Hotmail', colorClass: 'bg-blue-500', textClass: 'text-blue-400', borderClass: 'border-blue-500/20 bg-blue-500/5' };
+  }
+  if (lower.includes('warmup')) {
+    return { label: 'Warmup', colorClass: 'bg-orange-500', textClass: 'text-orange-400', borderClass: 'border-orange-500/20 bg-orange-500/5' };
+  }
+  if (lower.includes('snds')) {
+    return { label: 'SNDS', colorClass: 'bg-emerald-500', textClass: 'text-emerald-400', borderClass: 'border-emerald-500/20 bg-emerald-500/5' };
+  }
+  if (lower.includes('connect')) {
+    return { label: 'Connect', colorClass: 'bg-cyan-500', textClass: 'text-cyan-400', borderClass: 'border-cyan-500/25 bg-cyan-500/5' };
+  }
+  return { label: 'Default', colorClass: 'bg-zinc-500', textClass: 'text-zinc-500', borderClass: 'border-zinc-800 bg-zinc-950/20' };
+};
+
+const DivideResultDisplay: React.FC<{ 
+  data: DivideResultData;
+  searchQuery?: string;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ data, searchQuery, onShowToast }) => {
+  const filteredData = Object.entries(data).filter(([tagName]) => {
+    if (!searchQuery) return true;
+    return tagName.toLowerCase().includes(searchQuery.toLowerCase());
+  });
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {(Object.entries(data) as [string, DivideProfileEntry[]][]).map(([tagName, profiles]) => {
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {filteredData.map(([tagName, profilesVal]) => {
+        const profiles = profilesVal as DivideProfileEntry[];
         const sortedProfiles = [...profiles].sort((a, b) => a.profileNumber - b.profileNumber);
+        const category = getSessionCategory(tagName);
         
         return (
-          <div key={tagName} className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm">
-            <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+          <div key={tagName} className="relative bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm group/card">
+            <div className={`absolute left-0 top-1/4 bottom-1/4 w-1 rounded-r-md ${category.colorClass} opacity-80`} />
+            <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between pl-5">
               <div className="flex items-center gap-2">
-                <div className="w-1.5 h-4 bg-teal-500 rounded-full" />
                 <span className="font-display font-semibold text-zinc-200 tracking-tight">{tagName}</span>
+                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${category.borderClass} ${category.textClass} uppercase font-bold`}>
+                  {category.label}
+                </span>
                 <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded font-mono">
                   {profiles.length} Profiles
                 </span>
               </div>
-              <DivideGroupCopyBtn tagName={tagName} profiles={profiles} />
+              <DivideGroupCopyBtn tagName={tagName} profiles={profiles} onShowToast={onShowToast} />
             </div>
             
-            <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1">
+            <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1 pl-5">
               {sortedProfiles.map((p, i) => (
                 <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
                   <span className="text-zinc-600 w-8 text-right flex-shrink-0">{p.profileNumber}</span>
@@ -460,7 +496,11 @@ const DivideResultDisplay: React.FC<{ data: DivideResultData }> = ({ data }) => 
   );
 };
 
-const DivideGroupCopyBtn: React.FC<{ tagName: string; profiles: DivideProfileEntry[] }> = ({ tagName, profiles }) => {
+const DivideGroupCopyBtn: React.FC<{ 
+  tagName: string; 
+  profiles: DivideProfileEntry[];
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ tagName, profiles, onShowToast }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -468,6 +508,9 @@ const DivideGroupCopyBtn: React.FC<{ tagName: string; profiles: DivideProfileEnt
     const profileLines = sortedProfiles.map(p => `${p.tagName}\t${p.profileNumber}\t${p.id}`).join('\n');
     navigator.clipboard.writeText(profileLines);
     setCopied(true);
+    if (onShowToast) {
+      onShowToast(`Group "${tagName}" successfully copied!`, 'success');
+    }
     setTimeout(() => setCopied(false), 1500);
   };
 
@@ -484,24 +527,95 @@ const DivideGroupCopyBtn: React.FC<{ tagName: string; profiles: DivideProfileEnt
 
 // --- UI Components ---
 
-const DropResult: React.FC<{ name: string; sessions: { [sessionName: string]: { [hour: number]: string[] } } }> = ({ name, sessions }) => {
+const DropResult: React.FC<{ 
+  name: string; 
+  sessions: { [sessionName: string]: { [hour: number]: string[] } };
+  forceState?: 'expand' | 'collapse' | null;
+  searchQuery?: string;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ name, sessions, forceState, searchQuery, onShowToast }) => {
   const [isOpen, setIsOpen] = useState(true);
+  const [copiedDrop, setCopiedDrop] = useState(false);
+
+  React.useEffect(() => {
+    if (forceState === 'expand') {
+      setIsOpen(true);
+    } else if (forceState === 'collapse') {
+      setIsOpen(false);
+    }
+  }, [forceState]);
+
+  // Filter sessions inside the drop visually by search query
+  const filteredSessions = Object.entries(sessions).filter(([sessionName]) => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const category = getSessionCategory(sessionName);
+    return sessionName.toLowerCase().includes(lowerQuery) || category.label.toLowerCase().includes(lowerQuery);
+  });
+
+  const handleCopyDrop = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const profiles: string[] = [];
+    Object.values(sessions).forEach(hours => {
+      Object.values(hours).forEach(plist => {
+        profiles.push(...plist);
+      });
+    });
+    if (profiles.length === 0) return;
+    navigator.clipboard.writeText(profiles.join('\n'));
+    setCopiedDrop(true);
+    if (onShowToast) {
+      onShowToast(`Drop "${name}" successfully copied to clipboard!`, 'success');
+    }
+    setTimeout(() => setCopiedDrop(false), 2000);
+  };
+
+  if (filteredSessions.length === 0 && searchQuery) {
+    return null; // hide drop if no matching sessions
+  }
 
   return (
-    <div className="border border-zinc-800 rounded-xl mb-6 overflow-hidden bg-zinc-900/50">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-4 bg-zinc-800/30 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800"
-      >
-        <div className="flex items-center gap-3">
-          <Layers className="w-5 h-5 text-blue-500" />
-          <span className="font-display font-semibold text-xl tracking-tight uppercase">{name}</span>
-          <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-mono">
-            {Object.keys(sessions).length} Sessions
-          </span>
+    <div className="border border-zinc-900 rounded-2xl mb-8 overflow-hidden bg-zinc-950/20 backdrop-blur-sm shadow-sm transition-all">
+      <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-4.5 bg-zinc-900/30 border-b border-zinc-900/60 gap-3">
+        <button 
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-3.5 text-left group/btn"
+        >
+          <div className="p-1.5 bg-blue-550/10 border border-blue-550/20 text-blue-400 rounded-lg group-hover/btn:border-blue-500/40 transition-colors">
+            <Layers className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <span className="font-display font-bold text-zinc-100 tracking-tight text-[17px] leading-tight group-hover/btn:text-blue-450 transition-colors uppercase">{name}</span>
+            <span className="text-[10px] bg-zinc-900/80 border border-zinc-800/60 text-zinc-450 px-2.5 py-0.5 rounded-full font-semibold font-mono self-start sm:self-auto leading-none">
+              {Object.keys(sessions).length} Sessions
+            </span>
+          </div>
+        </button>
+
+        <div className="flex items-center gap-2.5 self-end sm:self-auto">
+          <button
+            onClick={handleCopyDrop}
+            title="Copy entire drop data"
+            className={`
+              flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider transition-all border
+              ${copiedDrop 
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-sm' 
+                : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border-zinc-800 hover:border-zinc-700'}
+            `}
+          >
+            <ClipboardCopy className="w-3.5 h-3.5 text-zinc-500" />
+            {copiedDrop ? 'Copied Drop' : 'Copy Drop'}
+          </button>
+          
+          <button 
+            onClick={() => setIsOpen(!isOpen)}
+            className="p-1.5 rounded-lg bg-zinc-905/60 hover:bg-zinc-805 border border-zinc-800 hover:border-zinc-700 text-zinc-450 hover:text-zinc-200 transition-colors"
+            aria-label="Toggle Details"
+          >
+            {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
         </div>
-        {isOpen ? <ChevronDown className="w-5 h-5 text-zinc-500" /> : <ChevronRight className="w-5 h-5 text-zinc-500" />}
-      </button>
+      </div>
       
       <AnimatePresence>
         {isOpen && (
@@ -509,12 +623,11 @@ const DropResult: React.FC<{ name: string; sessions: { [sessionName: string]: { 
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+            className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 bg-zinc-900/10"
           >
-            {(Object.entries(sessions) as [string, { [hour: number]: string[] }][])
-              .map(([sessionName, hourlyData]) => (
-                <SessionCard key={sessionName} name={sessionName} hours={hourlyData} />
-              ))}
+            {filteredSessions.map(([sessionName, hourlyData]) => (
+              <SessionCard key={sessionName} name={sessionName} hours={hourlyData} onShowToast={onShowToast} />
+            ))}
           </motion.div>
         )}
       </AnimatePresence>
@@ -522,7 +635,11 @@ const DropResult: React.FC<{ name: string; sessions: { [sessionName: string]: { 
   );
 };
 
-const SessionCard: React.FC<{ name: string; hours: { [hour: number]: string[] } }> = ({ name, hours }) => {
+const SessionCard: React.FC<{ 
+  name: string; 
+  hours: { [hour: number]: string[] };
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ name, hours, onShowToast }) => {
   const [copiedAll, setCopiedAll] = useState(false);
 
   // Flattened profiles to get min/max for the range display
@@ -530,69 +647,95 @@ const SessionCard: React.FC<{ name: string; hours: { [hour: number]: string[] } 
   const numericProfiles = allProfiles.map(p => parseInt(p, 10)).filter(n => !isNaN(n));
   const minProfile = numericProfiles.length > 0 ? Math.min(...numericProfiles) : (allProfiles[0] || '0');
   const maxProfile = numericProfiles.length > 0 ? Math.max(...numericProfiles) : (allProfiles[allProfiles.length - 1] || '0');
-
+  
   const handleCopyAll = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (allProfiles.length === 0) return;
     navigator.clipboard.writeText(allProfiles.join('\n'));
     setCopiedAll(true);
+    if (onShowToast) {
+      onShowToast(`Session "${name}" copied to clipboard!`, 'success');
+    }
     setTimeout(() => setCopiedAll(false), 2000);
   };
 
+  const category = getSessionCategory(name);
+
   return (
-    <div className="bg-zinc-950/40 border border-zinc-800/80 rounded-xl p-5 shadow-sm hover:border-zinc-700/80 hover:bg-zinc-950/60 transition-all flex flex-col justify-between gap-4 h-full group/card">
-      <div className="space-y-2">
-        {/* Session Name */}
-        <h3 className="text-base font-display font-semibold text-zinc-200 tracking-tight truncate leading-tight" title={name}>
-          {name}
-        </h3>
-        
-        {/* Total Profiles Label */}
-        <p className="text-xs font-mono text-zinc-400">
-          Total Profiles: <span className="font-bold text-zinc-200">{allProfiles.length}</span>
-        </p>
-      </div>
+    <div className="relative bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/60 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-zinc-900/50 transition-all flex flex-col justify-between gap-3.5 h-full group/card overflow-visible">
+      {/* Category accent line on top */}
+      <div className={`absolute top-0 left-0 right-0 h-[3px] ${category.colorClass} opacity-60 rounded-t-xl`} />
 
-      {/* FROM / TO Range Table Display */}
-      <div className="w-full bg-zinc-900/40 border border-zinc-800/80 rounded-lg p-3">
-        <div className="grid grid-cols-2 text-center border-b border-zinc-800/60 pb-1.5 mb-2">
-          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest">FROM</span>
-          <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest">TO</span>
+      {/* Row 1: Session title & Category Tag on the left, Profiles & count info on the right */}
+      <div className="flex items-center justify-between gap-3 mt-0.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="text-sm font-sans font-semibold text-zinc-100 tracking-tight truncate" title={name}>
+            {name}
+          </h3>
+          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${category.borderClass} ${category.textClass} font-bold tracking-wider shrink-0`}>
+            {category.label}
+          </span>
         </div>
-        <div className="grid grid-cols-2 text-center">
-          <span className="text-base font-mono font-bold text-white tabular-nums">{minProfile}</span>
-          <span className="text-base font-mono font-bold text-white tabular-nums">{maxProfile}</span>
+        <div className="flex items-center gap-1.5 text-zinc-400 font-mono text-xs shrink-0 select-none">
+          <span className="text-[9px] text-zinc-500 font-medium uppercase tracking-wider">Profiles</span>
+          <span className="font-bold text-zinc-200 tabular-nums">{allProfiles.length}</span>
         </div>
       </div>
 
-      {/* Copy All Button */}
+      {/* Row 2: Clean 2-column metrics row (From / To) */}
+      <div className="w-full bg-zinc-950/20 border border-zinc-900/40 rounded-lg p-2.5">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex flex-col">
+            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase">From</span>
+            <span className="text-xs font-semibold text-zinc-100 mt-0.5 tabular-nums">{minProfile}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[8.5px] font-mono font-semibold tracking-wider text-zinc-500 uppercase">To</span>
+            <span className="text-xs font-semibold text-zinc-100 mt-0.5 tabular-nums">{maxProfile}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 3: Full-width Copy Button */}
       <div>
         <button
           onClick={handleCopyAll}
           className={`
-            w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all
+            w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider transition-all border
             ${copiedAll 
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-              : 'bg-zinc-900 text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 border border-zinc-800 hover:border-blue-500/30'}
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25 shadow-sm' 
+              : 'bg-zinc-900/60 text-zinc-450 hover:text-blue-450 hover:bg-blue-500/10 border-zinc-800 hover:border-blue-500/20'}
           `}
         >
           <ClipboardCopy className="w-3.5 h-3.5" />
-          {copiedAll ? 'Copied' : 'Copy All'}
+          {copiedAll ? 'Copied' : 'Copy Session'}
         </button>
       </div>
     </div>
   );
 };
 
-const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
+const FlattenedResult: React.FC<{ 
+  ids: string[];
+  searchQuery?: string;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ ids, searchQuery, onShowToast }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
     if (ids.length === 0) return;
     navigator.clipboard.writeText(ids.join('\n'));
     setCopied(true);
+    if (onShowToast) {
+       onShowToast("All tag IDs successfully copied!", "success");
+    }
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const filteredIds = ids.filter(id => {
+    if (!searchQuery) return true;
+    return id.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
@@ -601,7 +744,7 @@ const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
           <Terminal className="w-5 h-5 text-blue-400" />
           <span className="font-display font-semibold text-lg uppercase tracking-tight">Tags List</span>
           <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-mono">
-            {ids.length} IDs
+            {filteredIds.length} IDs {searchQuery ? '(Filtered)' : ''}
           </span>
         </div>
         <button
@@ -621,11 +764,11 @@ const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
         className="p-6 cursor-pointer group relative"
       >
         <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-          {ids.length === 0 ? (
-            <div className="text-zinc-600 italic">No IDs found in brackets [ ]</div>
+          {filteredIds.length === 0 ? (
+            <div className="text-zinc-650 italic text-center py-6">No matching IDs found</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1">
-              {ids.map((id, index) => (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1 font-semibold">
+              {filteredIds.map((id, index) => (
                 <div key={index} className="text-xs font-mono text-zinc-400 flex items-center gap-3 group/item py-0.5">
                   <span className="text-zinc-700 w-6 text-right select-none">{index + 1}.</span>
                   <span className="text-zinc-300 group-hover/item:text-blue-400 transition-colors uppercase">{id}</span>
@@ -635,7 +778,7 @@ const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
           )}
         </div>
         
-        {ids.length > 0 && (
+        {filteredIds.length > 0 && (
           <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
             <div className="bg-zinc-950 px-4 py-2 rounded-full border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest shadow-2xl">
               Click anywhere to copy all
@@ -647,7 +790,11 @@ const FlattenedResult: React.FC<{ ids: string[] }> = ({ ids }) => {
   );
 };
 
-const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
+const ReorganizedResult: React.FC<{ 
+  data: ReorganizedData;
+  searchQuery?: string;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ data, searchQuery, onShowToast }) => {
   const [copiedAll, setCopiedAll] = useState(false);
 
   const handleCopyAll = () => {
@@ -656,8 +803,19 @@ const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
     const text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
     navigator.clipboard.writeText(text);
     setCopiedAll(true);
+    if (onShowToast) {
+      onShowToast("All reorganized records successfully copied!", "success");
+    }
     setTimeout(() => setCopiedAll(false), 2000);
   };
+
+  // Filter keys (sessionNames) visually by search query
+  const filteredData = Object.entries(data).filter(([sessionName]) => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const category = getSessionCategory(sessionName);
+    return sessionName.toLowerCase().includes(lowerQuery) || category.label.toLowerCase().includes(lowerQuery);
+  });
 
   return (
     <div className="space-y-6">
@@ -675,47 +833,64 @@ const ReorganizedResult: React.FC<{ data: ReorganizedData }> = ({ data }) => {
         </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {(Object.entries(data) as [string, ReorganizedEntry[]][]).map(([sessionName, entries]) => (
-          <div key={sessionName} className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm">
-            <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-4 bg-blue-500 rounded-full" />
-                <span className="font-display font-semibold text-zinc-200 tracking-tight">{sessionName}</span>
-                <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded font-mono">
-                  {entries.length}
-                </span>
-              </div>
-              <SessionCopyIcon entries={entries} />
-            </div>
-            <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1">
-              {entries.map((e, i) => (
-                <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
-                  <span className="text-zinc-600 w-4 text-right flex-shrink-0">{e.number}</span>
-                  <span className="text-zinc-500 truncate flex-1 group-hover:text-zinc-300 transition-colors">{e.name}</span>
-                  {e.proxy && (
-                    <span className="text-emerald-500 font-mono text-[10px] flex-shrink-0 bg-emerald-500/5 px-1.5 rounded border border-emerald-500/10">
-                      {e.proxy}
-                    </span>
-                  )}
-                  <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors uppercase tracking-tight">{e.id}</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {filteredData.map(([sessionName, entriesVal]) => {
+          const entries = entriesVal as ReorganizedEntry[];
+          const category = getSessionCategory(sessionName);
+          return (
+            <div key={sessionName} className="relative bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm group/card">
+              {/* Subtle top indicator category line */}
+              <div className={`absolute top-0 left-0 right-0 h-1 ${category.colorClass} opacity-70`} />
+              
+              <div className="p-4 border-b border-zinc-800 bg-zinc-800/30 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-display font-semibold text-zinc-200 tracking-tight">{sessionName}</span>
+                  <span className={`text-[9px] font-mono px-2 py-0.5 rounded border ${category.borderClass} ${category.textClass} uppercase font-bold`}>
+                    {category.label}
+                  </span>
+                  <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded font-mono">
+                    {entries.length}
+                  </span>
                 </div>
-              ))}
+                <SessionCopyIcon entries={entries} sessionName={sessionName} onShowToast={onShowToast} />
+              </div>
+              
+              <div className="p-4 max-h-72 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-1 font-semibold">
+                {entries.map((e, i) => (
+                  <div key={i} className="flex gap-4 py-1.5 border-b border-zinc-800/50 last:border-0 group">
+                    <span className="text-zinc-600 w-4 text-right flex-shrink-0">{e.number}</span>
+                    <span className="text-zinc-500 truncate flex-1 group-hover:text-zinc-300 transition-colors">{e.name}</span>
+                    {e.proxy && (
+                      <span className="text-emerald-500 font-mono text-[10px] flex-shrink-0 bg-emerald-500/5 px-1.5 rounded border border-emerald-500/10">
+                        {e.proxy}
+                      </span>
+                    )}
+                    <span className="text-blue-400 font-medium flex-shrink-0 group-hover:text-blue-300 transition-colors uppercase tracking-tight">{e.id}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 };
 
-const SessionCopyIcon: React.FC<{ entries: ReorganizedEntry[] }> = ({ entries }) => {
+const SessionCopyIcon: React.FC<{ 
+  entries: ReorganizedEntry[];
+  sessionName: string;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+}> = ({ entries, sessionName, onShowToast }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
     const text = entries.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
+    if (onShowToast) {
+       onShowToast(`Reorganized session "${sessionName}" copied!`, 'success');
+    }
     setTimeout(() => setCopied(false), 1500);
   };
 
@@ -729,6 +904,12 @@ const SessionCopyIcon: React.FC<{ entries: ReorganizedEntry[] }> = ({ entries })
     </button>
   );
 };
+
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'info' | 'error';
+}
 
 export default function App() {
   const [mode, setMode] = useState<ProcessingMode>('distribution');
@@ -750,6 +931,19 @@ export default function App() {
   const [divideResult, setDivideResult] = useState<DivideResultData | null>(null);
   const [isDivideProcessing, setIsDivideProcessing] = useState(false);
 
+  // Enhanced UI/UX State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [forceDropsState, setForceDropsState] = useState<'expand' | 'collapse' | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  };
+
   const handleGenerateDivide = () => {
     if (!divideInput.trim() || !divideIntervals.trim()) return;
     setIsDivideProcessing(true);
@@ -757,9 +951,10 @@ export default function App() {
       try {
         const result = process_divide_tags(divideInput, divideIntervals);
         setDivideResult(result);
+        showToast("Divider calculations loaded!", "success");
       } catch (error) {
         console.error("Divide error:", error);
-        alert("Failed to divide tags. Check console for details.");
+        showToast("Failed to divide tags. Check console for details.", "error");
       } finally {
         setIsDivideProcessing(false);
       }
@@ -770,6 +965,7 @@ export default function App() {
     if (!divideResult) return;
     const text = format_divide_output(divideResult);
     navigator.clipboard.writeText(text);
+    showToast("Divided output text copied successfully!", "success");
   };
 
   const [copiedSheets, setCopiedSheets] = useState(false);
@@ -779,6 +975,7 @@ export default function App() {
     const text = format_divide_sheets_output(divideResult);
     navigator.clipboard.writeText(text);
     setCopiedSheets(true);
+    showToast("Copied to clipboard for Google Sheets!", "success");
     setTimeout(() => setCopiedSheets(false), 2000);
   };
 
@@ -816,10 +1013,11 @@ export default function App() {
 
         const reorgData = parse_reorganize(globalInput, filteredProxies);
         setReorgResult(reorgData);
+        showToast("All sessions generated successfully!", "success");
 
       } catch (error) {
         console.error("Processing error:", error);
-        alert("Failed to process data. Check console for details.");
+        showToast("Failed to process data. Check console for details.", "error");
       } finally {
         setIsProcessing(false);
       }
@@ -827,14 +1025,100 @@ export default function App() {
   };
 
   const handleExportJSON = () => {
-    if (!distResult) return;
-    const blob = new Blob([JSON.stringify(distResult, null, 2)], { type: 'application/json' });
+    let resultToExport: any = null;
+    if (mode === 'distribution' && distResult) {
+      resultToExport = distResult;
+    } else if (mode === 'flatten' && flatResult) {
+      resultToExport = flatResult;
+    } else if (mode === 'reorganize' && reorgResult) {
+      resultToExport = reorgResult;
+    } else if (mode === 'divide' && divideResult) {
+      resultToExport = divideResult;
+    }
+
+    if (!resultToExport) {
+      showToast("No data available to export!", "error");
+      return;
+    }
+
+    const blob = new Blob([JSON.stringify(resultToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `session_flow_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `sessionflow_export_${mode}_${new Date().toISOString().split('T')[0]}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    showToast("JSON file exported successfully!", "success");
+  };
+
+  const handleExportTXT = () => {
+    let text = "";
+    if (mode === 'distribution' && distResult) {
+      text = JSON.stringify(distResult, null, 2);
+    } else if (mode === 'flatten' && flatResult) {
+      text = flatResult.join('\n');
+    } else if (mode === 'reorganize' && reorgResult) {
+      const all = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
+      text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
+    } else if (mode === 'divide' && divideResult) {
+      text = format_divide_output(divideResult);
+    }
+
+    if (!text) {
+      showToast("No data available to export!", "error");
+      return;
+    }
+
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sessionflow_export_${mode}_${new Date().toISOString().split('T')[0]}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("TXT file exported successfully!", "success");
+  };
+
+  const handleExportCSV = () => {
+    let text = "";
+    if (mode === 'distribution' && distResult) {
+      const rows: string[] = ["Drop,SessionName,Hour,ProfileNumber"];
+      Object.entries(distResult).forEach(([dropName, sessionsObj]) => {
+        Object.entries(sessionsObj).forEach(([sessionName, hoursMap]) => {
+          Object.entries(hoursMap).forEach(([hourStr, profilesVal]) => {
+            const profiles = profilesVal as string[];
+            profiles.forEach(p => {
+              rows.push(`"${dropName}","${sessionName}","Hour ${hourStr}","${p}"`);
+            });
+          });
+        });
+      });
+      text = rows.join('\n');
+    } else if (mode === 'flatten' && flatResult) {
+      text = "Tag ID\n" + flatResult.join('\n');
+    } else if (mode === 'reorganize' && reorgResult) {
+      const rows = ["Number,SessionName,ProxyIP,ProfileID"];
+      (Object.values(reorgResult) as ReorganizedEntry[][]).flat().forEach(e => {
+        rows.push(`"${e.number}","${e.name}","${e.proxy || ''}","${e.id}"`);
+      });
+      text = rows.join('\n');
+    } else if (mode === 'divide' && divideResult) {
+      text = format_divide_sheets_output(divideResult).replace(/\t/g, ',');
+    }
+
+    if (!text) {
+      showToast("No data available to export!", "error");
+      return;
+    }
+
+    const blob = new Blob([text], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sessionflow_export_${mode}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV file exported successfully!", "success");
   };
 
   const handleClear = () => {
@@ -846,25 +1130,93 @@ export default function App() {
     setDivideInput('');
     setDivideIntervals('');
     setDivideResult(null);
+    setSearchQuery('');
+    showToast("All fields and results cleared!", "info");
   };
 
   const handleCopyResult = () => {
+    let copiedText = "";
     if (mode === 'distribution' && distResult) {
-      navigator.clipboard.writeText(JSON.stringify(distResult, null, 2));
+      copiedText = JSON.stringify(distResult, null, 2);
     } else if (mode === 'flatten' && flatResult) {
-      navigator.clipboard.writeText(flatResult.join('\n'));
+      copiedText = flatResult.join('\n');
     } else if (mode === 'reorganize' && reorgResult) {
       const all = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
-      const text = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
-      navigator.clipboard.writeText(text);
+      copiedText = all.map(e => e.proxy ? `${e.number}#${e.name}#${e.proxy}` : `${e.number}#${e.name}`).join('\n');
     } else if (mode === 'divide' && divideResult) {
-      const text = format_divide_output(divideResult);
-      navigator.clipboard.writeText(text);
+      copiedText = format_divide_output(divideResult);
+    }
+
+    if (copiedText) {
+      navigator.clipboard.writeText(copiedText);
+      showToast("All results copied to clipboard!", "success");
+    } else {
+      showToast("No results to copy!", "error");
     }
   };
 
+  const getSummaryStats = () => {
+    let totalSessions = 0;
+    let totalProfiles = 0;
+    let totalDrops = 0;
+    
+    if (mode === 'distribution' && distResult) {
+      totalDrops = Object.keys(distResult).length;
+      const sessionNames = new Set<string>();
+      Object.values(distResult).forEach(sessionsObj => {
+        Object.entries(sessionsObj).forEach(([sName, hrMap]) => {
+          sessionNames.add(sName);
+          totalProfiles += Object.values(hrMap).flat().length;
+        });
+      });
+      totalSessions = sessionNames.size;
+    } else if (mode === 'flatten' && flatResult) {
+      totalProfiles = flatResult.length;
+      const parsed = parse_input(globalInput);
+      totalSessions = new Set(parsed.map(p => p.sessionName)).size;
+      totalDrops = new Set(parsed.map(p => p.dropName)).size;
+    } else if (mode === 'reorganize' && reorgResult) {
+      totalSessions = Object.keys(reorgResult).length;
+      totalProfiles = Object.values(reorgResult).flat().length;
+      const parsed = parse_input(globalInput);
+      totalDrops = new Set(parsed.map(p => p.dropName)).size;
+    } else if (mode === 'divide' && divideResult) {
+      totalSessions = Object.keys(divideResult).length;
+      totalProfiles = Object.values(divideResult).flat().length;
+    }
+
+    const totalProxies = proxyInput.split('\n').filter(p => p.trim()).length;
+    
+    const excludedSet = new Set();
+    const matches = excludedProxyInput.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b/g);
+    if (matches) {
+      matches.forEach(m => excludedSet.add(m.trim()));
+    }
+    const excludedProxies = excludedSet.size;
+
+    let usedProxies = 0;
+    if (reorgResult) {
+      const allEntries = (Object.values(reorgResult) as ReorganizedEntry[][]).flat();
+      const usedSet = new Set<string>();
+      allEntries.forEach(entry => {
+        if (entry.proxy) usedSet.add(entry.proxy);
+      });
+      usedProxies = usedSet.size;
+    }
+
+    return { 
+      totalSessions, 
+      totalProfiles, 
+      totalDrops, 
+      totalProxies, 
+      excludedProxies,
+      usedProxies,
+      remainingProxies: Math.max(0, totalProxies - excludedProxies)
+    };
+  };
+
   return (
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto">
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24">
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
@@ -884,46 +1236,35 @@ export default function App() {
         <div className="flex gap-2">
           {((mode === 'distribution' && distResult) || (mode === 'flatten' && flatResult) || (mode === 'reorganize' && reorgResult) || (mode === 'divide' && divideResult)) && (
             <>
-              {mode === 'distribution' && distResult && (
-                <button 
-                  onClick={handleExportJSON}
-                  className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
-                >
-                  <FileJson className="w-4 h-4 text-blue-400" />
-                  Export JSON
-                </button>
-              )}
-              {mode === 'divide' && divideResult && (
-                <button 
-                  onClick={handleCopyDivideSheets}
-                  className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-emerald-500 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-emerald-400"
-                >
-                  <ClipboardCopy className="w-4 h-4 text-emerald-500/80" />
-                  {copiedSheets ? 'Copied!' : 'Copy All'}
-                </button>
-              )}
+              <button 
+                onClick={handleExportJSON}
+                className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-355 select-none"
+              >
+                <FileJson className="w-4 h-4 text-blue-400" />
+                Export JSON
+              </button>
               <button 
                 onClick={handleCopyResult}
-                className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300"
+                className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-350 rounded-md text-sm font-medium transition-all flex items-center gap-2 group text-zinc-300 select-none"
               >
-                <ClipboardCopy className="w-4 h-4 text-zinc-400" />
-                {mode === 'distribution' ? 'Copy JSON' : mode === 'flatten' ? 'Copy All Tags' : mode === 'reorganize' ? 'Copy All Reordered' : 'Copy Divided Tags'}
+                <ClipboardCopy className="w-4 h-4 text-zinc-450" />
+                Copy All Results
               </button>
             </>
           )}
           <button 
             onClick={handleClear}
-            className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-red-900/50 hover:bg-red-950/20 text-zinc-400 hover:text-red-400 rounded-md text-sm font-medium transition-all flex items-center gap-2"
+            className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-red-900/50 hover:bg-red-950/20 text-zinc-400 hover:text-red-400 rounded-md text-sm font-medium transition-all flex items-center gap-2 select-none"
           >
             <Trash2 className="w-4 h-4" />
-            Clear
+            Clear Input & Output
           </button>
         </div>
       </header>
 
       {/* Global Input Section */}
       {mode !== 'divide' && (
-        <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm mb-12">
+        <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-6 relative overflow-hidden backdrop-blur-sm mb-8">
           <div className="absolute top-0 right-0 p-4 pointer-events-none">
             <Play className="w-32 h-32 text-zinc-800/10" />
           </div>
@@ -945,7 +1286,7 @@ export default function App() {
               onClick={handleGenerateAll}
               disabled={!globalInput.trim() || isProcessing}
               className={`
-                px-12 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all
+                px-12 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all select-none
                 ${!globalInput.trim() || isProcessing 
                   ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed opacity-50' 
                   : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-600/30 active:scale-[0.98] animate-in'}
@@ -959,42 +1300,159 @@ export default function App() {
                   <Activity className="w-6 h-6" />
                 </motion.div>
               ) : <Play className="w-6 h-6 fill-current" />}
-              {isProcessing ? 'PROCESSING ALL...' : 'GENERATE'}
+              {isProcessing ? 'PROCESSING ALL...' : 'GENERATE OUTPUTS'}
             </button>
           </div>
         </section>
       )}
 
-      {/* Mode Selector (Tabs) */}
-      <div className="flex flex-wrap bg-zinc-900/50 p-1.5 rounded-xl border border-zinc-800 mb-8 w-fit gap-1">
-        <button
-          onClick={() => setMode('distribution')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'distribution' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
-        >
-          <Layers className="w-4 h-4" />
-          Distribute Sessions
-        </button>
-        <button
-          onClick={() => setMode('flatten')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'flatten' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
-        >
-          <Terminal className="w-4 h-4" />
-          Get Tags
-        </button>
-        <button
-          onClick={() => setMode('reorganize')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'reorganize' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
-        >
-          <Activity className="w-4 h-4" />
-          Reorganize Sessions
-        </button>
-        <button
-          onClick={() => setMode('divide')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-all ${mode === 'divide' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
-        >
-          <Columns className="w-4 h-4" />
-          Divide Tags
-        </button>
+      {/* SaaS Dashboard Summary Bar (Requirement 1 & 10) */}
+      {(() => {
+        const stats = getSummaryStats();
+        const hasResult = !!(distResult || flatResult || reorgResult || divideResult);
+        if (!hasResult) return null;
+        return (
+          <section className="bg-zinc-950/25 border border-zinc-900/80 rounded-2xl p-6 mb-8 backdrop-blur-sm shadow-sm transition-all">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest leading-none">Workspace Statistics & System health</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {/* Card 1: Total Sessions */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
+                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Sessions</div>
+                <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalSessions}</div>
+              </div>
+              {/* Card 2: Total Profiles */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
+                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Profiles</div>
+                <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalProfiles}</div>
+              </div>
+              {/* Card 3: Total Drops */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
+                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Drops</div>
+                <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalDrops || "—"}</div>
+              </div>
+              {/* Card 4: Proxy Status: Total */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
+                <div className="text-[10px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Total Proxies</div>
+                <div className="text-2xl font-display font-light text-zinc-200 tracking-tight mt-1.5">{stats.totalProxies}</div>
+              </div>
+              {/* Card 5: Proxy Status: Excluded */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all">
+                <div className="text-[10px] font-mono font-medium text-rose-500/70 uppercase tracking-wider">Excluded Proxies</div>
+                <div className="text-2xl font-display font-light text-rose-400 tracking-tight mt-1.5">{stats.excludedProxies}</div>
+              </div>
+              {/* Card 6: Proxy Status: Used */}
+              <div className="bg-zinc-900/15 border border-zinc-900/60 p-4 rounded-xl hover:border-zinc-800/85 hover:bg-zinc-900/20 transition-all col-span-2 md:col-span-1">
+                <div className="text-[10px] font-mono font-medium text-emerald-500/70 uppercase tracking-wider">Available Proxies</div>
+                <div className="text-2xl font-display font-light text-emerald-400 tracking-tight mt-1.5">{stats.remainingProxies}</div>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* Sticky Action Bar & Control Centre (Requirement 3 & 4 & 6) */}
+      <div className="sticky top-0 z-40 bg-zinc-950/85 backdrop-blur-md border border-zinc-900 py-3.5 mb-8 -mx-4 px-4 md:-mx-8 md:px-8 shadow-xl rounded-xl">
+        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+          
+          {/* Workgroup Tabs */}
+          <div className="flex flex-wrap bg-zinc-900/40 p-1 rounded-xl border border-zinc-900/85 w-full lg:w-fit gap-1 select-none">
+            <button
+              onClick={() => { setMode('distribution'); setSearchQuery(''); }}
+              className={`flex items-center justify-center gap-2 px-4.5 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-all flex-1 lg:flex-none ${mode === 'distribution' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'}`}
+            >
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              Distribute
+            </button>
+            <button
+              onClick={() => { setMode('flatten'); setSearchQuery(''); }}
+              className={`flex items-center justify-center gap-2 px-4.5 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-all flex-1 lg:flex-none ${mode === 'flatten' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'}`}
+            >
+              <Terminal className="w-3.5 h-3.5 shrink-0" />
+              Get Tags
+            </button>
+            <button
+              onClick={() => { setMode('reorganize'); setSearchQuery(''); }}
+              className={`flex items-center justify-center gap-2 px-4.5 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-all flex-1 lg:flex-none ${mode === 'reorganize' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'}`}
+            >
+              <Activity className="w-3.5 h-3.5 shrink-0" />
+              Reorganize
+            </button>
+            <button
+              onClick={() => { setMode('divide'); setSearchQuery(''); }}
+              className={`flex items-center justify-center gap-2 px-4.5 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-all flex-1 lg:flex-none ${mode === 'divide' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'}`}
+            >
+              <Columns className="w-3.5 h-3.5 shrink-0" />
+              Divide
+            </button>
+          </div>
+
+          {/* Search tool (Requirement 2) & Actions */}
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:max-w-2xl justify-end">
+            
+            {/* Visual Search Box */}
+            <div className="relative w-full sm:max-w-xs group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search sessions/tags..."
+                className="w-full pl-10 pr-4 py-2 bg-zinc-900/70 border border-zinc-850 rounded-xl text-xs font-bold uppercase tracking-wide text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 transition-all font-mono"
+              />
+            </div>
+
+            {/* Expand / Collapse All controller (Requirement 3) */}
+            {mode === 'distribution' && distResult && (
+              <div className="flex bg-zinc-900/60 border border-zinc-850 rounded-xl p-1 gap-1 w-full sm:w-auto select-none">
+                <button
+                  onClick={() => {
+                    setForceDropsState('expand');
+                    showToast("Expanded all drop sections!", "info");
+                  }}
+                  className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-mono font-black uppercase tracking-wider text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all whitespace-nowrap"
+                >
+                  Expand All
+                </button>
+                <div className="w-px bg-zinc-800" />
+                <button
+                  onClick={() => {
+                    setForceDropsState('collapse');
+                    showToast("Collapsed all drop sections!", "info");
+                  }}
+                  className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-mono font-black uppercase tracking-wider text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all whitespace-nowrap"
+                >
+                  Collapse All
+                </button>
+              </div>
+            )}
+
+            {/* Export Section Buttons (Requirement 5 & 8: CSV/TXT/JSON formats) */}
+            {((mode === 'distribution' && distResult) || (mode === 'flatten' && flatResult) || (mode === 'reorganize' && reorgResult) || (mode === 'divide' && divideResult)) && (
+              <div className="flex bg-zinc-900/60 border border-zinc-850 rounded-xl p-1 gap-1 w-full sm:w-auto shrink-0 justify-center select-none font-semibold">
+                <button
+                  onClick={handleExportTXT}
+                  title="Export to Text (.txt)"
+                  className="p-1 px-3 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-all flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5 text-zinc-500" />
+                  TXT
+                </button>
+                <button
+                  onClick={handleExportCSV}
+                  title="Export to Spreadsheet (.csv)"
+                  className="p-1 px-3 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400 hover:bg-emerald-500/10 hover:text-emerald-400 transition-all flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-500/70" />
+                  CSV
+                </button>
+              </div>
+            )}
+          </div>
+
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-12">
@@ -1017,26 +1475,33 @@ export default function App() {
                 >
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                    <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Distribution Result</h2>
+                    <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Distribution Results</h2>
                   </div>
 
                   <div className="space-y-4">
                     {Object.keys(distResult).length === 0 ? (
-                      <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-600">
+                      <div className="p-12 border border-dashed border-zinc-800 rounded-xl text-center text-zinc-650">
                         No data identified. Ensure session names are followed by profile numbers.
                       </div>
                     ) : (
                       (Object.entries(distResult) as [string, { [sessionName: string]: { [hour: number]: string[] } }][]).map(([dropName, dropData]) => (
-                        <DropResult key={dropName} name={dropName} sessions={dropData} />
+                        <DropResult 
+                          key={dropName} 
+                          name={dropName} 
+                          sessions={dropData} 
+                          searchQuery={searchQuery}
+                          forceState={forceDropsState}
+                          onShowToast={showToast}
+                        />
                       ))
                     )}
                   </div>
                 </motion.section>
               ) : (
-                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                <div className="p-12 border-2 border-dashed border-zinc-900 rounded-xl text-center bg-zinc-950/20">
                   <Layers className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
                   <p className="text-zinc-600 font-medium max-w-sm mx-auto">
-                    Click Generate to process the input and see the 23-hour schedule distribution.
+                    Click Generate above to process your input and see the 23-hour schedule distribution.
                   </p>
                 </div>
               )}
@@ -1064,13 +1529,17 @@ export default function App() {
                     <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Tags List</h2>
                   </div>
 
-                  <FlattenedResult ids={flatResult} />
+                  <FlattenedResult 
+                    ids={flatResult} 
+                    searchQuery={searchQuery}
+                    onShowToast={showToast}
+                  />
                 </motion.section>
               ) : (
-                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                <div className="p-12 border-2 border-dashed border-zinc-905 rounded-xl text-center bg-zinc-905/10">
                   <Terminal className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
-                    Click Generate to extract all bracketed [IDs] into a clean tag list.
+                  <p className="text-zinc-650 font-medium max-w-sm mx-auto">
+                    Click Generate above to extract all bracketed [IDs] into a clean tag list.
                   </p>
                 </div>
               )}
@@ -1089,10 +1558,10 @@ export default function App() {
                 {/* Main Input Reminder/Access */}
                 <div className="space-y-3">
                    <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-zinc-500" />
+                    <Layers className="w-4 h-4 text-zinc-550" />
                     <label className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-[0.2em]">Main Session Input</label>
                   </div>
-                  <div className="p-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg text-xs text-zinc-500 italic">
+                  <div className="p-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg text-xs text-zinc-500 italic font-semibold">
                     Using global input from above. 
                     {globalInput ? ` (${globalInput.split('\n').filter(l => l.trim()).length} lines detected)` : ' (No input detected)'}
                   </div>
@@ -1114,7 +1583,7 @@ export default function App() {
                   <textarea
                     value={proxyInput}
                     onChange={(e) => setProxyInput(e.target.value)}
-                    placeholder="50.3.117.98:92\n185.40.18.76:92\nPaste proxy list IP:PORT format..."
+                    placeholder="50.3.117.98:92&#10;185.40.18.76:92&#10;Paste proxy list IP:PORT format..."
                     className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none shadow-inner"
                   />
                 </div>
@@ -1142,7 +1611,7 @@ export default function App() {
                   <textarea
                     value={excludedProxyInput}
                     onChange={(e) => setExcludedProxyInput(e.target.value)}
-                    placeholder="• Proxy IP: 15.235.17.147:92 exceeds limit: 60...\nPaste any text or reports containing proxies to exclude..."
+                    placeholder="• Proxy IP: 15.235.17.147:92 exceeds limit: 60...&#10;Paste any text or reports containing proxies to exclude..."
                     className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/20 transition-all resize-none shadow-inner"
                   />
                 </div>
@@ -1152,14 +1621,14 @@ export default function App() {
                     onClick={handleGenerateAll}
                     disabled={!globalInput.trim() || isProcessing}
                     className={`
-                      px-16 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all
+                      px-16 py-4 rounded-xl flex items-center gap-3 font-display font-bold text-xl transition-all select-none
                       ${!globalInput.trim() || isProcessing 
-                        ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed' 
+                        ? 'bg-zinc-800 text-zinc-655 cursor-not-allowed' 
                         : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl shadow-indigo-600/30 active:scale-[0.98]'}
                     `}
                   >
                     {isProcessing ? <Activity className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6 fill-current" />}
-                    {isProcessing ? 'PROCESSING...' : 'GENERATE'}
+                    {isProcessing ? 'PROCESSING...' : 'GENERATE REORGANIZED'}
                   </button>
                 </div>
               </div>
@@ -1178,13 +1647,17 @@ export default function App() {
                     <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
                     <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Reorganized Records</h2>
                   </div>
-                  <ReorganizedResult data={reorgResult} />
+                  <ReorganizedResult 
+                    data={reorgResult} 
+                    searchQuery={searchQuery}
+                    onShowToast={showToast}
+                  />
                 </motion.section>
               ) : (
-                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center bg-zinc-900/10">
                   <Activity className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
-                    Click Generate to transform horizontal rows into vertical grouped records with proxies.
+                  <p className="text-zinc-650 font-medium max-w-sm mx-auto">
+                    Click Generate reorganized above to transform horizontal rows into vertical grouped records with proxies.
                   </p>
                 </div>
               )}
@@ -1217,7 +1690,10 @@ export default function App() {
                         {globalInput && !divideInput && (
                           <button
                             type="button"
-                            onClick={() => setDivideInput(globalInput)}
+                            onClick={() => {
+                              setDivideInput(globalInput);
+                              showToast("Loaded global session input!", "info");
+                            }}
                             className="text-[9px] font-mono font-bold text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-1.5 py-0.5 rounded transition-all"
                           >
                             Load Global Session Input
@@ -1260,7 +1736,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap justify-center gap-4 pt-2">
+                <div className="flex flex-wrap justify-center gap-4 pt-2 select-none">
                   <button
                     onClick={handleGenerateDivide}
                     disabled={!divideInput.trim() || !divideIntervals.trim() || isDivideProcessing}
@@ -1272,7 +1748,7 @@ export default function App() {
                     `}
                   >
                     {isDivideProcessing ? <Activity className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
-                    {isDivideProcessing ? 'PROCESSING...' : 'GENERATE'}
+                    {isDivideProcessing ? 'PROCESSING...' : 'GENERATE DIVIDED'}
                   </button>
 
                   <button
@@ -1280,6 +1756,7 @@ export default function App() {
                       setDivideInput('');
                       setDivideIntervals('');
                       setDivideResult(null);
+                      showToast("Division layout cleared!", "info");
                     }}
                     className="px-6 py-4 bg-zinc-900 border border-zinc-800 hover:border-red-900/50 hover:bg-red-950/20 text-zinc-400 hover:text-red-400 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
                   >
@@ -1305,30 +1782,34 @@ export default function App() {
                       <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Divided Results</h2>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 select-none">
                       <button
                         onClick={handleCopyDivideSheets}
-                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-bold uppercase tracking-wider transition-all text-white shadow-md active:scale-[0.98] flex items-center gap-2 transition-all"
+                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-bold uppercase tracking-wider transition-all text-white shadow-md active:scale-[0.98] flex items-center gap-2"
                       >
                         <ClipboardCopy className="w-4 h-4 text-emerald-100" />
-                        {copiedSheets ? 'COPIED!' : 'Copy All'}
+                        {copiedSheets ? 'COPIED!' : 'Copy for Sheets'}
                       </button>
                       <button
                         onClick={handleCopyDivideOutput}
                         className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-300 rounded-lg text-sm font-bold uppercase tracking-wider transition-all text-white shadow-lg flex items-center gap-2"
                       >
                         <ClipboardCopy className="w-4 h-4 text-zinc-400" />
-                        Copy Output
+                        Copy Raw output
                       </button>
                     </div>
                   </div>
 
-                  <DivideResultDisplay data={divideResult} />
+                  <DivideResultDisplay 
+                    data={divideResult} 
+                    searchQuery={searchQuery}
+                    onShowToast={showToast}
+                  />
                 </motion.section>
               ) : (
-                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center">
+                <div className="p-12 border-2 border-dashed border-zinc-800 rounded-xl text-center bg-zinc-950/20">
                   <Columns className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-                  <p className="text-zinc-600 font-medium max-w-sm mx-auto">
+                  <p className="text-zinc-650 font-medium max-w-sm mx-auto">
                     Configure Session Data and Interval Mapping above, then click Generate to divide tags.
                   </p>
                 </div>
@@ -1340,7 +1821,7 @@ export default function App() {
 
       <footer className="mt-16 pt-8 border-t border-zinc-900 flex justify-between items-center text-[10px] font-mono text-zinc-700 uppercase tracking-widest">
         <div className="flex items-center gap-4">
-          <span>Engine: Any-String v1.1 Professional</span>
+          <span>Engine: Any-String v1.1 Professional Edition</span>
           <span className="w-1 h-1 rounded-full bg-zinc-800" />
           <span>Status: Multi-View Enabled</span>
         </div>
@@ -1348,6 +1829,25 @@ export default function App() {
           Universal Table & List Parsing Enabled
         </div>
       </footer>
+
+      {/* Lightweight Toast Popups (Requirement 9) */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: -20 }}
+              className="pointer-events-auto bg-zinc-950/95 border border-zinc-800/80 text-white shadow-2xl p-4 rounded-xl flex items-center gap-3 backdrop-blur-md"
+            >
+              <div className={`w-2 h-2 rounded-full ${toast.type === 'success' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : toast.type === 'error' ? 'bg-rose-500' : 'bg-blue-500'}`} />
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-300">{toast.message}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
     </div>
   );
 }
